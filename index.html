@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Corretor OMR Completo</title>
+  <title>Corretor OMR - Versão Final Corrigida</title>
   <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body {
@@ -117,19 +117,11 @@
   </div>
 
   <script>
-    // CONFIGURAÇÃO DO GABARITO (0:0, 1:0, 2:1, 3:1, 4:2, 5:2, 6:3, 7:3, 8:2, 9:2)
+    // CONFIGURAÇÃO DO GABARITO
     const CONFIG = {
       answerKey: {
-        0: 0,   // Questão 1: A
-        1: 0,   // Questão 2: A
-        2: 1,   // Questão 3: B
-        3: 1,   // Questão 4: B
-        4: 2,   // Questão 5: C
-        5: 2,   // Questão 6: C
-        6: 3,   // Questão 7: D
-        7: 3,   // Questão 8: D
-        8: 2,   // Questão 9: C
-        9: 2    // Questão 10: C
+        0: 0, 1: 0, 2: 1, 3: 1, 4: 2,
+        5: 2, 6: 3, 7: 3, 8: 2, 9: 2
       },
       optionsPerQuestion: 5,
       minBubbleArea: 200,
@@ -373,7 +365,7 @@
           contourVector.push_back(bubble.contour);
           
           const mask = new cv.Mat.zeros(state.binary.rows, state.binary.cols, cv.CV_8UC1);
-          cv.drawContours(mask, contourVector, -1, 255, -1);
+          cv.drawContours(mask, contourVector, -1, new cv.Scalar(255, 255, 255, 255), -1);
           
           const masked = new cv.Mat();
           cv.bitwise_and(state.binary, mask, masked);
@@ -401,13 +393,14 @@
           
           const answer = results.answers[qIndex];
           if ((i % CONFIG.optionsPerQuestion) === (answer.marked - 1) || answer.marked === '-') {
-            const center = new cv.Point(bubble.center.x, bubble.center.y);
-            const radius = bubble.rect.width / 2;
-            const color = answer.isCorrect ? new cv.Scalar(0, 255, 0) : new cv.Scalar(0, 0, 255);
+            const color = answer.isCorrect 
+              ? new cv.Scalar(0, 255, 0, 255)  // Verde
+              : new cv.Scalar(0, 0, 255, 255);  // Vermelho
             
+            const thickness = 2;
             const contourVector = new cv.MatVector();
             contourVector.push_back(bubble.contour);
-            cv.drawContours(src, contourVector, -1, color, 2);
+            cv.drawContours(src, contourVector, -1, color, thickness);
             contourVector.delete();
           }
         });
