@@ -38,14 +38,15 @@
     function onOpenCvReady() {
       notaDiv.innerText = 'Carregando câmera...';
       startCamera();
+
       video.addEventListener('canplay', () => {
         if (!cap) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+          video.width = video.videoWidth;
+          video.height = video.videoHeight;
           cap = new cv.VideoCapture(video);
-          src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+          src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
           gray = new cv.Mat();
-          out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
+          out = new cv.Mat.zeros(video.height, video.width, cv.CV_8UC3);
           notaDiv.innerText = 'Captura ativa. Processando...';
           processVideo();
         }
@@ -55,7 +56,6 @@
     function processVideo() {
       let begin = Date.now();
       cap.read(src);
-
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
       cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
       cv.Canny(gray, gray, 75, 200);
