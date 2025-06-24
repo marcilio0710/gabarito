@@ -6,92 +6,55 @@
   <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body { font-family: sans-serif; text-align: center; }
-    video, canvas { width: 90%; max-width: 400px; margin: 10px auto; }
-    #nota { font-size: 1.2em; }
+    video, canvas { width: 90%; max-width: 400px; }
+    #nota { font-size: 1.2em; margin: 10px; }
   </style>
 </head>
 <body>
-  <h1>Corretor de Prova OMR</h1>
+  <h1>Corretor OMR no Navegador</h1>
   <video id="videoInput" autoplay playsinline></video>
   <canvas id="canvasOutput"></canvas>
-  <div id="nota">Carregando...</div>
+  <div id="nota">Aguardando correção...</div>
 
   <script>
-    const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1}; 
+    const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1}; // configure seu gabarito aqui
     let video = document.getElementById('videoInput');
     let canvas = document.getElementById('canvasOutput');
     let notaDiv = document.getElementById('nota');
+    let cap, streaming = false, width = 320, height = 0;
 
     function startCamera() {
-      navigator.mediaDevices.getUserMedia({video: true})
-        .then(s => { video.srcObject = s; video.play(); })
-        .catch(err => notaDiv.innerText = `Erro: ${err}`);
+      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        .then(s => {
+          video.srcObject = s;
+          video.play();
+        })
+        .catch(err => notaDiv.innerText = `Erro ao acessar câmera: ${err}`);
+      video.addEventListener('canplay', () => {
+        if (!streaming) {
+          height = video.videoHeight / (video.videoWidth / width);
+          video.setAttribute('width', width);
+          video.setAttribute('height', height);
+          canvas.width = width;
+          canvas.height = height;
+          cap = new cv.VideoCapture(video);
+          streaming = true;
+          processVideo();
+        }
+      }, false);
     }
 
-    function processFrame() {
-      const w = video.videoWidth, h = video.videoHeight;
-      if (!w || !h) return setTimeout(processFrame, 100);
-
-      canvas.width = w; canvas.height = h;
-      let src = new cv.Mat(h, w, cv.CV_8UC4);
+    function processVideo() {
+      if (!streaming) return;
+      let src = new cv.Mat(height, width, cv.CV_8UC4);
       let gray = new cv.Mat();
-      cv.cvtColor(cv.imread(video), gray, cv.COLOR_RGBA2GRAY);
+      let out = new cv.Mat.zeros(height, width, cv.CV_8UC3);
+
+      cap.read(src);
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
       cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
       cv.Canny(gray, gray, 75, 200);
 
-      // Encontrar contornos do gabarito
+      // Detecção de bolhas
       let cnts = new cv.MatVector(), hierarchy = new cv.Mat();
       cv.findContours(gray, cnts, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-      let bubbles = [];
-      for (let i = 0; i < cnts.size(); i++) {
-        let c = cnts.get(i);
-        let rect = cv.boundingRect(c);
-        let ar = rect.width / rect.height;
-        if (rect.width > 20 && rect.height > 20 && ar > 0.9 && ar < 1.1)
-          bubbles.push({c, rect});
-      }
-
-      bubbles.sort((a,b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
-      let rows = [], choices = 5;
-      for (let i = 0; i < bubbles.length; i += choices)
-        rows.push(bubbles.slice(i, i+choices));
-
-      let correctCount = 0;
-      let out = new cv.Mat.zeros(h, w, cv.CV_8UC3);
-      rows.forEach((r, qi) => {
-        let maxI = -1, maxVal = 0;
-        r.forEach((b, j) => {
-          let mask = new cv.Mat.zeros(h,w,cv.CV_8UC1);
-          cv.drawContours(mask, new cv.MatVector(b.c), -1, new cv.Scalar(255), -1);
-          let m = new cv.Mat();
-          cv.bitwise_and(gray, mask, m);
-          let cnt = cv.countNonZero(m);
-          if (cnt > maxVal) { maxVal = cnt; maxI = j; }
-          m.delete(); mask.delete();
-        });
-
-        let correct = ANSWER_KEY[qi];
-        let col = r[maxI].rect.x + r[maxI].rect.width/2;
-        let y = r[0].rect.y + r[0].rect.height/2;
-        let color = (maxI === correct) ? [0,255,0] : [0,0,255];
-        cv.circle(out, new cv.Point(col, y), r[0].rect.width/2, color, 4);
-        if (maxI === correct) correctCount++;
-      });
-
-      cv.imshow(canvas, out);
-      const total = Object.keys(ANSWER_KEY).length;
-      notaDiv.innerText = `Acertos: ${correctCount}/${total} – Nota: ${((correctCount/total)*100).toFixed(1)}%`;
-
-      src.delete(); gray.delete(); cnts.delete(); hierarchy.delete(); out.delete();
-      setTimeout(processFrame, 500);
-    }
-
-    function onCvReady() {
-      startCamera();
-      video.addEventListener('play', processFrame);
-    }
-
-    cv['onRuntimeInitialized'] = onCvReady;
-  </script>
-</body>
-</html>
