@@ -17,26 +17,30 @@
   <div id="nota">Aguardando inicialização...</div>
 
   <script>
-const ANSWER_KEY = {0: 0, 1: 0, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3, 8: 2, 9: 2};
+    const ANSWER_KEY = {
+      0: 1, 1: 4, 2: 0, 3: 3, 4: 1,
+      5: 4, 6: 3, 7: 2, 8: 1, 9: 0
+    };
     const FPS = 10;
+
     let video = document.getElementById('videoInput');
     let canvas = document.getElementById('canvasOutput');
     let notaDiv = document.getElementById('nota');
     let cap, src, gray, out;
 
-function startCamera() {
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-    .then(stream => {
-      video.srcObject = stream;
-      video.play();
-    })
-    .catch(err => {
-      notaDiv.innerText = `Erro ao acessar câmera: ${err}`;
-    });
-}
+    function startCamera() {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+        .then(stream => {
+          video.srcObject = stream;
+          video.play();
+        })
+        .catch(err => {
+          notaDiv.innerText = `Erro ao acessar câmera: ${err}`;
+        });
+    }
 
     function onOpenCvReady() {
-      console.log('Executando onOpenCvReady');
+      console.log('OpenCV pronto, iniciando câmera');
       notaDiv.innerText = 'Carregando câmera...';
       startCamera();
 
@@ -54,11 +58,74 @@ function startCamera() {
       });
     }
 
-    // Atribui ao evento de carregamento do OpenCV
-    cv['onRuntimeInitialized'] = () => {
-      console.log('OpenCV pronto');
-      onOpenCvReady();
-    };
+    function processVideo() {
+      if (!cap) return;
+      let begin = Date.now();
+
+      cap.read(src);
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
+      cv.Canny(gray, gray, 75, 200);
+
+      const cnts = new cv.MatVector();
+      const hierarchy = new cv.Mat();
+      cv.findContours(gray, cnts, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+      const bubbles = [];
+      for (let i = 0; i < cnts.size(); i++) {
+        const c = cnts.get(i);
+        const r = cv.boundingRect(c);
+        const ar = r.width / r.height;
+        if (r.width > 20 && r.height > 20 && ar > 0.9 && ar < 1.1) {
+          bubbles.push({ctr: c, rect: r});
+        }
+      }
+
+      bubbles.sort((a,b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+
+      const rows = [];
+      const choices = 5;
+      for (let i = 0; i < bubbles.length; i += choices) {
+        rows.push(bubbles.slice(i, i + choices));
+      }
+
+      let correctCount = 0;
+      out.setTo(new cv.Scalar(0,0,0,255));
+
+      rows.forEach((row, qi) => {
+        let maxIdx = -1, maxVal = 0;
+        row.forEach((b, j) => {
+          const mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+          cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
+          const m = new cv.Mat();
+          cv.bitwise_and(gray, mask, m);
+          const cnt = cv.countNonZero(m);
+          if (cnt > maxVal) { maxVal = cnt; maxIdx = j; }
+          m.delete(); mask.delete();
+        });
+
+        if (maxIdx >= 0) {
+          const center = new cv.Point(
+            row[maxIdx].rect.x + row[maxIdx].rect.width/2,
+            row[maxIdx].rect.y + row[maxIdx].rect.height/2
+          );
+          const correct = ANSWER_KEY[qi];
+          const color = (maxIdx === correct) ? [0,255,0] : [0,0,255];
+          cv.circle(out, center, row[maxIdx].rect.width/2, color, 4);
+          if (maxIdx === correct) correctCount++;
+        }
+      });
+
+      cv.imshow(canvas, out);
+      const total = Object.keys(ANSWER_KEY).length;
+      notaDiv.innerText = `Acertos: ${correctCount}/${total} — Nota: ${((correctCount/total)*100).toFixed(1)}%`;
+
+      cnts.delete(); hierarchy.delete();
+      const delay = Math.max(0, 1000/FPS - (Date.now() - begin));
+      setTimeout(processVideo, delay);
+    }
+
+    cv['onRuntimeInitialized'] = onOpenCvReady;
   </script>
 </body>
 </html>
