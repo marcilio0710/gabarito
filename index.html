@@ -58,7 +58,8 @@
 
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
       cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
-      cv.Canny(gray, gray, 75, 200);
+      cv.threshold(gray, gray, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+      cv.Canny(gray, gray, 50, 150);
 
       const cnts = new cv.MatVector(), hier = new cv.Mat();
       cv.findContours(gray, cnts, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -67,22 +68,49 @@
       for (let i = 0; i < cnts.size(); i++) {
         const c = cnts.get(i);
         const r = cv.boundingRect(c);
-        const ar = r.width/r.height;
-        if (r.width > 10 && r.height > 10 && ar > 0.8 && ar < 1.3) bubbles.push({ctr:c,rect:r});
+        const area = r.width * r.height;
+        const ar = r.width / r.height;
+        
+        // Filtros mais precisos para bolhas
+        if (area > 100 && area < 5000 && ar > 0.7 && ar < 1.4) {
+          bubbles.push({ctr: c, rect: r});
+        }
       }
       console.log('Bolhas detectadas:', bubbles.length);
 
-      bubbles.sort((a,b)=>a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+      // Ordenação mais robusta: primeiro por linha (y), depois por coluna (x)
+      bubbles.sort((a, b) => {
+        const yDiff = a.rect.y - b.rect.y;
+        if (Math.abs(yDiff) > a.rect.height/2) return yDiff;
+        return a.rect.x - b.rect.x;
+      });
+
+      // Agrupar por linhas (questões)
       const rows = [];
-      for (let i=0; i<bubbles.length; i+=5) rows.push(bubbles.slice(i, i+5));
-      console.log('Linhas (questões):', rows.length);
+      let currentRow = [bubbles[0]];
+      for (let i = 1; i < bubbles.length; i++) {
+        const prev = bubbles[i-1].rect;
+        const curr = bubbles[i].rect;
+        
+        // Se a diferença vertical for maior que metade da altura, nova linha
+        if (Math.abs(curr.y - prev.y) > prev.height/2) {
+          rows.push(currentRow);
+          currentRow = [bubbles[i]];
+        } else {
+          currentRow.push(bubbles[i]);
+        }
+      }
+      if (currentRow.length > 0) rows.push(currentRow);
+      console.log('Linhas detectadas:', rows.length);
 
       out.setTo(new cv.Scalar(0,0,0,255));
       let correctCount = 0;
 
       rows.forEach((row, qi) => {
+        if (qi >= Object.keys(ANSWER_KEY).length) return; // Ignora linhas extras
+        
         let maxIdx = -1, maxVal = -1;
-        row.forEach((b,j)=>{
+        row.forEach((b, j) => {
           const mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
           cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
           const m = new cv.Mat();
@@ -91,17 +119,18 @@
           if (cnt > maxVal) { maxVal = cnt; maxIdx = j; }
           m.delete(); mask.delete();
         });
+
         console.log(`Questão ${qi+1}: detectada=${maxIdx}, correta=${ANSWER_KEY[qi]}`);
 
-        if (maxIdx >= 0) {
+        if (maxIdx >= 0 && maxIdx < row.length) {
           const r = row[maxIdx].rect;
-          const center = new cv.Point(r.x+r.width/2, r.y+r.height/2);
-          const color = (maxIdx===ANSWER_KEY[qi]) ? [0,255,0,255] : [0,0,255,255];
+          const center = new cv.Point(r.x + r.width/2, r.y + r.height/2);
+          const isCorrect = (maxIdx === ANSWER_KEY[qi]);
+          const color = isCorrect ? [0, 255, 0, 255] : [0, 0, 255, 255];
           cv.circle(out, center, r.width/2, color, 4);
-          if (maxIdx === ANSWER_KEY[qi]) correctCount++;
+          if (isCorrect) correctCount++;
         }
       });
-      console.log('Acertos no frame:', correctCount);
 
       cv.imshow(outC, out);
       nota.innerText = `Acertos: ${correctCount}/${Object.keys(ANSWER_KEY).length} — Nota: ${((correctCount/Object.keys(ANSWER_KEY).length)*100).toFixed(1)}%`;
