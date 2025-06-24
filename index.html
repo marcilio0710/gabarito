@@ -12,50 +12,62 @@
 </head>
 <body>
   <h1>Corretor de Prova OMR</h1>
-  <video id="webcam" autoplay playsinline></video>
-  <canvas id="canvasOutput" style="display:none;"></canvas>
+  <video id="videoInput" autoplay playsinline></video>
+  <canvas id="canvasOutput"></canvas>
   <div id="nota">Aguardando correção...</div>
 
   <script>
-    const ANSWER_KEY = { 0: 1, 1: 4, 2: 0, 3: 3, 4: 1,
-        5: 4, 6: 3, 7: 2, 8: 1, 9: 0 }; // Configure seu gabarito aqui
-    let video = document.getElementById('webcam');
+    const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1}; // ajuste seu gabarito
+    let video = document.getElementById('videoInput');
     let canvas = document.getElementById('canvasOutput');
     let notaDiv = document.getElementById('nota');
 
-    function processVideo() {
-      if (!cv || !cv.imread) return;
+    function startCamera() {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          video.srcObject = stream;
+          video.play();
+        })
+        .catch(err => {
+          notaDiv.innerText = `Erro ao acessar câmera: ${err}`;
+        });
+    }
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-      let gray = new cv.Mat();
+    function processVideo() {
+      // Captura dimensões
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      if (width === 0 || height === 0) {
+        return setTimeout(processVideo, 100);
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      let src = new cv.Mat(height, width, cv.CV_8UC4);
+      let dst = new cv.Mat();
 
       let cap = new cv.VideoCapture(video);
       cap.read(src);
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
-      cv.Canny(gray, gray, 75, 200);
-      // TODO: aplicar four_point_transform, threshold, findContours, etc.
+      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
 
-      // Exemplo simplificado:
-      let acertos = 0; 
-      let total = Object.keys(ANSWER_KEY).length;
-      acertos = Math.floor(Math.random() * (total+1)); // temporário
-
-      let perc = ((acertos/total)*100).toFixed(1);
+      // Exemplo: simula correção automática
+      const total = Object.keys(ANSWER_KEY).length;
+      const acertos = Math.floor(Math.random() * (total + 1));
+      const perc = ((acertos/total)*100).toFixed(1);
       notaDiv.innerText = `Acertos: ${acertos}/${total} — Nota: ${perc}%`;
 
-      src.delete(); gray.delete();
-      setTimeout(processVideo, 1000);
+      cv.imshow(canvas, dst);
+
+      src.delete(); dst.delete();
+
+      setTimeout(processVideo, 500);
     }
 
     function onOpenCvReady() {
-      navigator.mediaDevices.getUserMedia({video: true})
-        .then(stream => {
-          video.srcObject = stream;
-          video.onloadedmetadata = () => processVideo();
-        }).catch(e => alert('Erro ao acessar câmera: ' + e));
+      startCamera();
+      video.addEventListener('play', () => {
+        processVideo();
+      }, false);
     }
 
     cv['onRuntimeInitialized'] = onOpenCvReady;
