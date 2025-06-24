@@ -82,4 +82,30 @@
           let mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
           cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
           let m = new cv.Mat();
-         
+          cv.bitwise_and(gray, mask, m);
+          let cnt = cv.countNonZero(m);
+          if (cnt > maxVal) { maxVal = cnt; maxIdx = j; }
+          m.delete(); mask.delete();
+        });
+        let correct = ANSWER_KEY[qi];
+        let center = new cv.Point(
+          row[maxIdx].rect.x + row[maxIdx].rect.width / 2,
+          row[maxIdx].rect.y + row[maxIdx].rect.height / 2
+        );
+        let color = (maxIdx === correct) ? [0,255,0] : [0,0,255];
+        cv.circle(out, center, row[maxIdx].rect.width / 2, color, 4);
+        if (maxIdx === correct) correctCount++;
+      });
+
+      cv.imshow(canvas, out);
+      notaDiv.innerText = `Acertos: ${correctCount}/${Object.keys(ANSWER_KEY).length} — Nota: ${((correctCount/Object.keys(ANSWER_KEY).length)*100).toFixed(1)}%`;
+
+      cnts.delete(); hierarchy.delete();
+      let delay = 1000/FPS - (Date.now() - begin);
+      setTimeout(processVideo, delay);
+    }
+
+    cv['onRuntimeInitialized'] = onOpenCvReady;
+  </script>
+</body>
+</html>
