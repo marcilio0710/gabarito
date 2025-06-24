@@ -2,70 +2,70 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Corretor OMR Avançado</title>
+  <title>Corretor OMR Completo</title>
   <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-    .container { display: flex; flex-wrap: wrap; gap: 20px; }
-    .camera-container, .result-container { flex: 1; min-width: 300px; }
-    video, canvas { width: 100%; border: 2px solid #ddd; border-radius: 8px; }
-    #status { padding: 10px; background: #f0f0f0; border-radius: 5px; margin-bottom: 10px; }
-    #results { margin-top: 20px; padding: 15px; background: #f8f8f8; border-radius: 8px; }
-    .error { color: #d32f2f; }
-    .success { color: #388e3c; }
-    button {
+    #videoContainer { position: relative; margin-bottom: 15px; }
+    video, canvas { width: 100%; border: 2px solid #ddd; border-radius: 8px; display: block; }
+    #captureBtn { 
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
       background: #4285f4;
       color: white;
       border: none;
-      padding: 10px 15px;
-      border-radius: 4px;
+      padding: 10px 20px;
+      border-radius: 5px;
       cursor: pointer;
-      margin-top: 10px;
+      font-size: 16px;
+      z-index: 10;
     }
-    button:hover { background: #3367d6; }
+    #captureBtn:disabled { background: #cccccc; cursor: not-allowed; }
+    #status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+    .ready { background: #e8f5e9; color: #2e7d32; }
+    .error { background: #ffebee; color: #c62828; }
+    #results { margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; }
   </style>
 </head>
 <body>
   <h1>Corretor de Gabarito Inteligente</h1>
-  <div id="status">Inicializando sistema...</div>
+  <div id="status" class="ready">Iniciando sistema...</div>
   
-  <div class="container">
-    <div class="camera-container">
-      <h2>Câmera</h2>
-      <video id="videoInput" autoplay playsinline muted></video>
-      <button id="captureBtn" disabled>Capturar Gabarito</button>
-    </div>
-    
-    <div class="result-container">
-      <h2>Resultado</h2>
-      <canvas id="canvasOutput"></canvas>
-      <div id="results">Aguardando processamento...</div>
-    </div>
+  <div id="videoContainer">
+    <video id="videoInput" autoplay playsinline muted></video>
+    <button id="captureBtn" disabled>Capturar Gabarito</button>
+    <canvas id="canvasOutput"></canvas>
   </div>
+  
+  <div id="results">Aguardando processamento...</div>
 
   <script>
-    // Configurações do gabarito
+    // Configurações
     const ANSWER_KEY = {0:1, 1:4, 2:0, 3:3, 4:1, 5:4, 6:3, 7:2, 8:1, 9:0};
     const OPTIONS_PER_QUESTION = 5;
-    const MIN_BUBBLE_AREA = 100;
-    const MAX_BUBBLE_AREA = 5000;
-    
-    // Elementos da página
+    const MIN_BUBBLE_AREA = 150;
+    const MAX_BUBBLE_AREA = 3000;
+
+    // Elementos
     const video = document.getElementById('videoInput');
     const canvas = document.getElementById('canvasOutput');
     const ctx = canvas.getContext('2d');
     const statusDiv = document.getElementById('status');
     const resultsDiv = document.getElementById('results');
     const captureBtn = document.getElementById('captureBtn');
-    
-    // Variáveis de estado
-    let processing = false;
-    let stream = null;
-    let lastResults = null;
+    const videoContainer = document.getElementById('videoContainer');
 
-    // Inicializa a câmera
+    // Estado
+    let stream = null;
+    let processing = false;
+    let openCvReady = false;
+    let cameraReady = false;
+
+    // Inicialização da câmera
     async function initCamera() {
-      updateStatus("Solicitando acesso à câmera...");
+      updateStatus("Acessando câmera...");
       
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -73,64 +73,71 @@
             facingMode: 'environment',
             width: { ideal: 1280 },
             height: { ideal: 720 }
-          },
-          audio: false
+          }
         });
         
         video.srcObject = stream;
-        updateStatus("Câmera inicializada com sucesso");
-        captureBtn.disabled = false;
+        video.onloadedmetadata = () => {
+          updateStatus("Câmera pronta. Aguardando OpenCV...");
+          cameraReady = true;
+          checkReadyState();
+        };
         
-        // Verifica se o OpenCV já está carregado
-        if (window.cv) {
-          onOpenCVReady();
-        } else {
-          updateStatus("Aguardando carregamento do OpenCV...");
-          window.cv = { onRuntimeInitialized: onOpenCVReady };
-        }
+        video.onerror = () => {
+          updateStatus("Erro na câmera", true);
+        };
+        
       } catch (err) {
         updateStatus(`Erro ao acessar câmera: ${err.message}`, true);
       }
     }
 
-    // Processa o gabarito
+    // Verifica se ambos estão prontos
+    function checkReadyState() {
+      if (openCvReady && cameraReady) {
+        updateStatus("Sistema pronto para capturar gabaritos");
+        captureBtn.disabled = false;
+      }
+    }
+
+    // Processamento do gabarito
     function processAnswerSheet() {
       if (processing) return;
       processing = true;
+      captureBtn.disabled = true;
+      updateStatus("Processando gabarito...");
       
       try {
-        // Ajusta o canvas para o tamanho do vídeo
+        // Ajusta canvas para o tamanho do vídeo
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Converte a imagem para processamento com OpenCV
+        // Converte para OpenCV
         const src = cv.imread(canvas);
         const gray = new cv.Mat();
         const binary = new cv.Mat();
         const contours = new cv.MatVector();
         const hierarchy = new cv.Mat();
         
-        // Pré-processamento da imagem
+        // Pré-processamento
         cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
         cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-        cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                            cv.THRESH_BINARY_INV, 11, 2);
+        cv.adaptiveThreshold(gray, binary, 255, 
+                           cv.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                           cv.THRESH_BINARY_INV, 11, 2);
         
         // Encontra contornos
         cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
         
-        // Filtra bolhas do gabarito
+        // Filtra bolhas
         const bubbles = [];
         for (let i = 0; i < contours.size(); i++) {
           const contour = contours.get(i);
           const rect = cv.boundingRect(contour);
           const area = rect.width * rect.height;
-          const aspectRatio = rect.width / rect.height;
           
-          // Critérios para identificar bolhas
-          if (area > MIN_BUBBLE_AREA && area < MAX_BUBBLE_AREA && 
-              aspectRatio > 0.7 && aspectRatio < 1.4) {
+          if (area > MIN_BUBBLE_AREA && area < MAX_BUBBLE_AREA) {
             bubbles.push({
               contour,
               rect,
@@ -139,40 +146,36 @@
           }
         }
         
-        // Ordena bolhas: primeiro por linha (y), depois por coluna (x)
+        // Ordena bolhas
         bubbles.sort((a, b) => {
           const yDiff = a.center.y - b.center.y;
-          if (Math.abs(yDiff) > a.rect.height * 0.5) return yDiff;
+          if (Math.abs(yDiff) > a.rect.height * 0.6) return yDiff;
           return a.center.x - b.center.x;
         });
         
-        // Agrupa por questões (cada questão tem OPTIONS_PER_QUESTION alternativas)
-        const questions = [];
-        for (let i = 0; i < bubbles.length; i += OPTIONS_PER_QUESTION) {
-          questions.push(bubbles.slice(i, i + OPTIONS_PER_QUESTION));
-        }
-        
-        // Processa cada questão
+        // Processa respostas
         const results = [];
-        let correctAnswers = 0;
+        let correctCount = 0;
         
-        questions.forEach((question, qIndex) => {
-          if (qIndex >= Object.keys(ANSWER_KEY).length) return;
+        for (let i = 0; i < bubbles.length; i += OPTIONS_PER_QUESTION) {
+          const questionBubbles = bubbles.slice(i, i + OPTIONS_PER_QUESTION);
+          const qIndex = i / OPTIONS_PER_QUESTION;
           
-          // Encontra a alternativa marcada (com maior área preta)
+          if (qIndex >= Object.keys(ANSWER_KEY).length) break;
+          
           let markedIndex = -1;
-          let maxBlackPixels = 0;
+          let maxPixels = 0;
           
-          question.forEach((bubble, bIndex) => {
+          questionBubbles.forEach((bubble, bIndex) => {
             const mask = new cv.Mat.zeros(binary.rows, binary.cols, cv.CV_8UC1);
             cv.drawContours(mask, new cv.MatVector(bubble.contour), -1, 255, -1);
             
             const masked = new cv.Mat();
             cv.bitwise_and(binary, mask, masked);
-            const blackPixels = cv.countNonZero(masked);
+            const pixels = cv.countNonZero(masked);
             
-            if (blackPixels > maxBlackPixels) {
-              maxBlackPixels = blackPixels;
+            if (pixels > maxPixels) {
+              maxPixels = pixels;
               markedIndex = bIndex;
             }
             
@@ -180,9 +183,8 @@
             masked.delete();
           });
           
-          // Verifica se está correta
           const isCorrect = markedIndex === ANSWER_KEY[qIndex];
-          if (isCorrect) correctAnswers++;
+          if (isCorrect) correctCount++;
           
           results.push({
             question: qIndex + 1,
@@ -190,20 +192,18 @@
             correct: ANSWER_KEY[qIndex] + 1,
             isCorrect
           });
-        });
+        }
         
         // Exibe resultados
-        displayResults(results, correctAnswers);
-        lastResults = results;
+        displayResults(results, correctCount);
         
-        // Desenha os resultados na imagem
-        questions.forEach((question, qIndex) => {
+        // Desenha na imagem
+        bubbles.forEach((bubble, i) => {
+          const qIndex = Math.floor(i / OPTIONS_PER_QUESTION);
           if (qIndex >= results.length) return;
           
           const result = results[qIndex];
-          const bubble = question[result.marked - 1];
-          
-          if (bubble) {
+          if ((i % OPTIONS_PER_QUESTION) === result.marked - 1) {
             const center = new cv.Point(bubble.center.x, bubble.center.y);
             const radius = bubble.rect.width / 2;
             const color = result.isCorrect ? new cv.Scalar(0, 255, 0) : new cv.Scalar(0, 0, 255);
@@ -221,71 +221,68 @@
         hierarchy.delete();
         
       } catch (err) {
-        updateStatus(`Erro no processamento: ${err.message}`, true);
+        updateStatus(`Erro: ${err.message}`, true);
         console.error(err);
       } finally {
         processing = false;
+        captureBtn.disabled = false;
       }
     }
 
-    // Exibe os resultados na página
+    // Exibe resultados
     function displayResults(results, correctCount) {
-      const totalQuestions = Object.keys(ANSWER_KEY).length;
-      const score = Math.round((correctCount / totalQuestions) * 100);
+      const total = Object.keys(ANSWER_KEY).length;
+      const score = Math.round((correctCount / total) * 100);
       
-      let html = `
-        <h3>Resultado: ${correctCount}/${totalQuestions} (${score}%)</h3>
-        <table>
-          <tr>
-            <th>Questão</th>
-            <th>Resposta Marcada</th>
-            <th>Resposta Correta</th>
-            <th>Status</th>
-          </tr>
-      `;
+      let html = `<h3>Resultado: ${correctCount}/${total} (${score}%)</h3><table>`;
+      html += `<tr><th>Questão</th><th>Marcada</th><th>Correta</th><th>Status</th></tr>`;
       
-      results.forEach(result => {
-        html += `
-          <tr>
-            <td>${result.question}</td>
-            <td>${result.marked || '-'}</td>
-            <td>${result.correct}</td>
-            <td class="${result.isCorrect ? 'success' : 'error'}">
-              ${result.isCorrect ? '✓' : '✗'}
-            </td>
-          </tr>
-        `;
+      results.forEach(r => {
+        html += `<tr>
+          <td>${r.question}</td>
+          <td>${r.marked || '-'}</td>
+          <td>${r.correct}</td>
+          <td class="${r.isCorrect ? 'ready' : 'error'}">
+            ${r.isCorrect ? '✓' : '✗'}
+          </td>
+        </tr>`;
       });
       
       html += `</table>`;
       resultsDiv.innerHTML = html;
-      updateStatus("Processamento concluído com sucesso!");
+      updateStatus("Processamento concluído!");
     }
 
-    // Atualiza o status na página
+    // Atualiza status
     function updateStatus(message, isError = false) {
       statusDiv.textContent = message;
-      statusDiv.className = isError ? 'error' : '';
-      console.log(message);
+      statusDiv.className = isError ? 'error' : 'ready';
     }
 
-    // Quando o OpenCV estiver pronto
+    // Quando OpenCV estiver pronto
     function onOpenCVReady() {
-      updateStatus("OpenCV carregado e pronto para uso");
-      captureBtn.addEventListener('click', processAnswerSheet);
+      openCvReady = true;
+      updateStatus("OpenCV carregado");
+      checkReadyState();
     }
 
-    // Inicia a aplicação
+    // Inicialização
     document.addEventListener('DOMContentLoaded', () => {
-      initCamera();
-      
-      // Configura callback do OpenCV se ainda não estiver pronto
-      if (!window.cv) {
+      // Configura OpenCV
+      if (window.cv) {
+        cv.onRuntimeInitialized = onOpenCVReady;
+      } else {
         window.cv = { onRuntimeInitialized: onOpenCVReady };
       }
+      
+      // Inicia câmera
+      initCamera();
+      
+      // Configura botão
+      captureBtn.addEventListener('click', processAnswerSheet);
     });
 
-    // Limpa recursos quando a página é fechada
+    // Limpeza
     window.addEventListener('beforeunload', () => {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
