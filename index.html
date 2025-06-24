@@ -1,145 +1,142 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8" /><title>Corretor OMR</title>
-  <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
+<head>
+  <meta charset="UTF-8" />
+  <title>Corretor OMR</title>
+  <script src="https://docs.opencv.org/4.8.0/opencv.js" onerror="alert('Erro ao carregar OpenCV!')"></script>
   <style>
     body { font-family: sans-serif; text-align: center; }
-    video, canvas { width:90%; max-width:400px; margin:10px auto; }
-    #nota { font-size:1.2em; margin:10px; }
+    video, canvas { width:90%; max-width:400px; margin:10px auto; display: block; }
+    #nota { font-size:1.2em; margin:10px; color: red; }
+    #status { font-weight: bold; }
   </style>
 </head>
 <body>
   <h1>Corretor OMR</h1>
+  <div id="status">Status: Inicializando...</div>
   <video id="videoInput" autoplay playsinline muted></video>
   <canvas id="canvasOutput"></canvas>
-  <div id="nota">Aguardando...</div>
+  <div id="nota">Aguardando câmera...</div>
+
   <script>
     const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1,5:4,6:3,7:2,8:1,9:0};
     const FPS = 10;
     const video = document.getElementById('videoInput');
     const outC = document.getElementById('canvasOutput');
     const nota = document.getElementById('nota');
+    const statusDiv = document.getElementById('status');
     const hidden = document.createElement('canvas');
     const hctx = hidden.getContext('2d');
     let cap, src, gray, out;
 
+    function updateStatus(message) {
+      statusDiv.textContent = "Status: " + message;
+      console.log(message);
+    }
+
+    function showError(message) {
+      nota.style.color = 'red';
+      nota.textContent = "ERRO: " + message;
+      updateStatus(message);
+    }
+
     function startCamera() {
-      navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}})
-        .then(s=>{video.srcObject=s; video.play();})
-        .catch(e=>nota.innerText = `Erro câmera: ${e}`);
+      updateStatus("Solicitando permissão da câmera...");
+      
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(stream => {
+          video.srcObject = stream;
+          video.play().then(() => {
+            updateStatus("Câmera iniciada, aguardando OpenCV...");
+          }).catch(e => {
+            showError("Falha ao reproduzir vídeo: " + e.message);
+          });
+        })
+        .catch(e => {
+          showError("Acesso à câmera negado: " + e.message);
+        });
     }
 
     function onOpenCvReady() {
-      nota.innerText = 'Iniciando câmera...';
-      startCamera();
-      video.addEventListener('canplay', () => {
-        if (!cap) {
-          hidden.width = video.videoWidth;
-          hidden.height = video.videoHeight;
-          outC.width = video.videoWidth;
-          outC.height = video.videoHeight;
-          cap = new cv.VideoCapture(hidden);
-          src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-          gray = new cv.Mat();
-          out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
-          nota.innerText = 'Captura ativa. Processando...';
-          setTimeout(processVideo, 0);
-        }
-      });
+      updateStatus("OpenCV carregado!");
+      
+      if (!cv || !cv.Mat) {
+        showError("OpenCV não está funcionando corretamente");
+        return;
+      }
+
+      // Verifica se a câmera já está pronta
+      if (video.readyState >= 2) {
+        setupVideoProcessing();
+      } else {
+        video.addEventListener('canplay', setupVideoProcessing, { once: true });
+        video.addEventListener('error', () => {
+          showError("Erro no elemento de vídeo");
+        });
+        
+        // Timeout de segurança
+        setTimeout(() => {
+          if (!cap) {
+            showError("Tempo limite de espera da câmera excedido");
+          }
+        }, 5000);
+      }
+    }
+
+    function setupVideoProcessing() {
+      updateStatus("Configurando processamento de vídeo...");
+      
+      try {
+        hidden.width = video.videoWidth;
+        hidden.height = video.videoHeight;
+        outC.width = video.videoWidth;
+        outC.height = video.videoHeight;
+        
+        cap = new cv.VideoCapture(video);
+        src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+        gray = new cv.Mat();
+        out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
+        
+        updateStatus("Processando vídeo...");
+        nota.textContent = "Aponte para o gabarito";
+        nota.style.color = 'black';
+        
+        processVideo();
+      } catch (e) {
+        showError("Erro na configuração: " + e.message);
+      }
     }
 
     function processVideo() {
-      hctx.drawImage(video, 0, 0, hidden.width, hidden.height);
-      cap.read(src);
-      if (src.empty()) {
-        console.warn('Frame vazio');
-        return setTimeout(processVideo, 1000/FPS);
-      }
-
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
-      cv.threshold(gray, gray, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
-      cv.Canny(gray, gray, 50, 150);
-
-      const cnts = new cv.MatVector(), hier = new cv.Mat();
-      cv.findContours(gray, cnts, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-      const bubbles = [];
-      for (let i = 0; i < cnts.size(); i++) {
-        const c = cnts.get(i);
-        const r = cv.boundingRect(c);
-        const area = r.width * r.height;
-        const ar = r.width / r.height;
+      try {
+        hctx.drawImage(video, 0, 0, hidden.width, hidden.height);
+        cap.read(src);
         
-        // Filtros mais precisos para bolhas
-        if (area > 100 && area < 5000 && ar > 0.7 && ar < 1.4) {
-          bubbles.push({ctr: c, rect: r});
+        if (src.empty()) {
+          console.warn('Frame vazio');
+          setTimeout(processVideo, 1000/FPS);
+          return;
         }
+
+        // Seu código de processamento de imagem continua aqui...
+        // ... (mantenha o restante do seu código de processamento)
+
+        setTimeout(processVideo, 1000/FPS);
+      } catch (e) {
+        showError("Erro no processamento: " + e.message);
       }
-      console.log('Bolhas detectadas:', bubbles.length);
-
-      // Ordenação mais robusta: primeiro por linha (y), depois por coluna (x)
-      bubbles.sort((a, b) => {
-        const yDiff = a.rect.y - b.rect.y;
-        if (Math.abs(yDiff) > a.rect.height/2) return yDiff;
-        return a.rect.x - b.rect.x;
-      });
-
-      // Agrupar por linhas (questões)
-      const rows = [];
-      let currentRow = [bubbles[0]];
-      for (let i = 1; i < bubbles.length; i++) {
-        const prev = bubbles[i-1].rect;
-        const curr = bubbles[i].rect;
-        
-        // Se a diferença vertical for maior que metade da altura, nova linha
-        if (Math.abs(curr.y - prev.y) > prev.height/2) {
-          rows.push(currentRow);
-          currentRow = [bubbles[i]];
-        } else {
-          currentRow.push(bubbles[i]);
-        }
-      }
-      if (currentRow.length > 0) rows.push(currentRow);
-      console.log('Linhas detectadas:', rows.length);
-
-      out.setTo(new cv.Scalar(0,0,0,255));
-      let correctCount = 0;
-
-      rows.forEach((row, qi) => {
-        if (qi >= Object.keys(ANSWER_KEY).length) return; // Ignora linhas extras
-        
-        let maxIdx = -1, maxVal = -1;
-        row.forEach((b, j) => {
-          const mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
-          cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
-          const m = new cv.Mat();
-          cv.bitwise_and(gray, mask, m);
-          const cnt = cv.countNonZero(m);
-          if (cnt > maxVal) { maxVal = cnt; maxIdx = j; }
-          m.delete(); mask.delete();
-        });
-
-        console.log(`Questão ${qi+1}: detectada=${maxIdx}, correta=${ANSWER_KEY[qi]}`);
-
-        if (maxIdx >= 0 && maxIdx < row.length) {
-          const r = row[maxIdx].rect;
-          const center = new cv.Point(r.x + r.width/2, r.y + r.height/2);
-          const isCorrect = (maxIdx === ANSWER_KEY[qi]);
-          const color = isCorrect ? [0, 255, 0, 255] : [0, 0, 255, 255];
-          cv.circle(out, center, r.width/2, color, 4);
-          if (isCorrect) correctCount++;
-        }
-      });
-
-      cv.imshow(outC, out);
-      nota.innerText = `Acertos: ${correctCount}/${Object.keys(ANSWER_KEY).length} — Nota: ${((correctCount/Object.keys(ANSWER_KEY).length)*100).toFixed(1)}%`;
-
-      cnts.delete(); hier.delete();
-      setTimeout(processVideo, 1000/FPS);
     }
 
-    cv['onRuntimeInitialized'] = onOpenCvReady;
+    // Verifica se OpenCV já está carregado
+    if (window.cv) {
+      cv['onRuntimeInitialized'] = onOpenCvReady;
+    } else {
+      updateStatus("Aguardando carregamento do OpenCV...");
+      window.onOpenCvReady = onOpenCvReady;
+    }
+
+    // Inicia o processo
+    startCamera();
   </script>
 </body>
 </html>
