@@ -6,29 +6,26 @@
   <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body { font-family: sans-serif; text-align: center; }
-    video, canvas { width: 90%; max-width: 400px; margin: 10px auto; }
-    #nota { font-size: 1.2em; margin: 10px; color: #333; }
+    video, canvas { width: 90%; max-width: 400px; }
+    #nota { font-size: 1.2em; margin: 10px; }
   </style>
 </head>
 <body>
-  <h1>Corretor de Prova OMR</h1>
+  <h1>Corretor OMR no Navegador</h1>
   <video id="videoInput" autoplay playsinline></video>
   <canvas id="canvasOutput"></canvas>
   <div id="nota">Aguardando inicialização...</div>
 
   <script>
-    const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1}; // Ajuste conforme seu gabarito
-    const choices = 5;
-
+    const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1};
+    const FPS = 10;
     let video = document.getElementById('videoInput');
     let canvas = document.getElementById('canvasOutput');
     let notaDiv = document.getElementById('nota');
-    let cap, streaming = false;
-    const width = 320;
-    let height = 0;
+    let cap, src, gray, out;
 
     function startCamera() {
-      navigator.mediaDevices.getUserMedia({ video: true })
+      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
         .then(stream => {
           video.srcObject = stream;
           video.play();
@@ -36,71 +33,53 @@
         .catch(err => {
           notaDiv.innerText = `Erro ao acessar câmera: ${err}`;
         });
+    }
 
+    function onOpenCvReady() {
+      notaDiv.innerText = 'Carregando câmera...';
+      startCamera();
       video.addEventListener('canplay', () => {
-        if (!streaming) {
-          height = video.videoHeight / (video.videoWidth / width);
-          video.setAttribute('width', width);
-          video.setAttribute('height', height);
-          canvas.width = width;
-          canvas.height = height;
-          cap = new cv.VideoCapture(video);
-          streaming = true;
-          notaDiv.innerText = 'Captura ativa. Processando...';
-          processVideo();
-        }
-      }, false);
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        cap = new cv.VideoCapture(video);
+        src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+        gray = new cv.Mat();
+        out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
+        notaDiv.innerText = 'Captura ativa. Processando...';
+        processVideo();
+      });
     }
 
     function processVideo() {
-      if (!streaming) return;
-
-      let src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
-      let gray = new cv.Mat();
-      let out = new cv.Mat.zeros(video.height, video.width, cv.CV_8UC3);
-
+      let begin = Date.now();
       cap.read(src);
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
+      cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
       cv.Canny(gray, gray, 75, 200);
 
-      let cnts = new cv.MatVector();
-      let hierarchy = new cv.Mat();
+      let cnts = new cv.MatVector(), hierarchy = new cv.Mat();
       cv.findContours(gray, cnts, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
       let bubbles = [];
       for (let i = 0; i < cnts.size(); i++) {
-        let ctr = cnts.get(i);
-        let r = cv.boundingRect(ctr);
+        let c = cnts.get(i);
+        let r = cv.boundingRect(c);
         let ar = r.width / r.height;
         if (r.width > 20 && r.height > 20 && ar > 0.9 && ar < 1.1) {
-          bubbles.push({ctr, rect: r});
+          bubbles.push({ctr: c, rect: r});
         }
       }
 
-      bubbles.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+      bubbles.sort((a,b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
       let rows = [];
-      for (let i = 0; i < bubbles.length; i += choices) {
-        rows.push(bubbles.slice(i, i + choices));
-      }
+      for (let i = 0; i < bubbles.length; i += 5)
+        rows.push(bubbles.slice(i, i + 5));
 
       let correctCount = 0;
       rows.forEach((row, qi) => {
         let maxIdx = -1, maxVal = 0;
         row.forEach((b, j) => {
-          let mask = cv.Mat.zeros(video.height, video.width, cv.CV_8UC1);
+          let mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
           cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
           let m = new cv.Mat();
-          cv.bitwise_and(gray, mask, m);
-          let cnt = cv.countNonZero(m);
-          if (cnt > maxVal) { maxVal = cnt; maxIdx = j; }
-          m.delete(); mask.delete();
-        });
-
-        let correct = ANSWER_KEY[qi];
-        let center = new cv.Point(
-          row[maxIdx].rect.x + row[maxIdx].rect.width/2,
-          row[maxIdx].rect.y + row[maxIdx].rect.height/2
-        );
-        let color = (maxIdx === correct) ? [0, 255, 0] : [0, 0, 255];
-        cv.circle(out, center, row[maxIdx].
+         
