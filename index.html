@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Corretor de Prova OMR</title>
+  <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; }
+    video, canvas { width: 90%; max-width: 400px; margin: 10px auto; }
+    #nota { font-size: 1.2em; color: #333; }
+  </style>
+</head>
+<body>
+  <h1>Corretor de Prova OMR</h1>
+  <video id="webcam" autoplay playsinline></video>
+  <canvas id="canvasOutput" style="display:none;"></canvas>
+  <div id="nota">Aguardando correção...</div>
+
+  <script>
+    const ANSWER_KEY = { 0: 1, 1: 4, 2: 0, 3: 3, 4: 1,
+        5: 4, 6: 3, 7: 2, 8: 1, 9: 0 }; // Configure seu gabarito aqui
+    let video = document.getElementById('webcam');
+    let canvas = document.getElementById('canvasOutput');
+    let notaDiv = document.getElementById('nota');
+
+    function processVideo() {
+      if (!cv || !cv.imread) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+      let gray = new cv.Mat();
+
+      let cap = new cv.VideoCapture(video);
+      cap.read(src);
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
+      cv.Canny(gray, gray, 75, 200);
+      // TODO: aplicar four_point_transform, threshold, findContours, etc.
+
+      // Exemplo simplificado:
+      let acertos = 0; 
+      let total = Object.keys(ANSWER_KEY).length;
+      acertos = Math.floor(Math.random() * (total+1)); // temporário
+
+      let perc = ((acertos/total)*100).toFixed(1);
+      notaDiv.innerText = `Acertos: ${acertos}/${total} — Nota: ${perc}%`;
+
+      src.delete(); gray.delete();
+      setTimeout(processVideo, 1000);
+    }
+
+    function onOpenCvReady() {
+      navigator.mediaDevices.getUserMedia({video: true})
+        .then(stream => {
+          video.srcObject = stream;
+          video.onloadedmetadata = () => processVideo();
+        }).catch(e => alert('Erro ao acessar câmera: ' + e));
+    }
+
+    cv['onRuntimeInitialized'] = onOpenCvReady;
+  </script>
+</body>
+</html>
