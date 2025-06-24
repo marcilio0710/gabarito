@@ -6,7 +6,7 @@
   <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body { font-family: sans-serif; text-align: center; }
-    video, canvas { width: 90%; max-width: 400px; }
+    video, canvas { width: 90%; max-width: 400px; margin: 10px auto; }
     #nota { font-size: 1.2em; margin: 10px; }
   </style>
 </head>
@@ -39,20 +39,23 @@
       notaDiv.innerText = 'Carregando câmera...';
       startCamera();
       video.addEventListener('canplay', () => {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        cap = new cv.VideoCapture(video);
-        src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-        gray = new cv.Mat();
-        out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
-        notaDiv.innerText = 'Captura ativa. Processando...';
-        processVideo();
+        if (!cap) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          cap = new cv.VideoCapture(video);
+          src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+          gray = new cv.Mat();
+          out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
+          notaDiv.innerText = 'Captura ativa. Processando...';
+          processVideo();
+        }
       });
     }
 
     function processVideo() {
       let begin = Date.now();
       cap.read(src);
+
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
       cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
       cv.Canny(gray, gray, 75, 200);
@@ -71,15 +74,18 @@
       }
 
       bubbles.sort((a,b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+
       let rows = [];
-      for (let i = 0; i < bubbles.length; i += 5)
-        rows.push(bubbles.slice(i, i + 5));
+      const choices = 5;
+      for (let i = 0; i < bubbles.length; i += choices) {
+        rows.push(bubbles.slice(i, i + choices));
+      }
 
       let correctCount = 0;
       rows.forEach((row, qi) => {
         let maxIdx = -1, maxVal = 0;
         row.forEach((b, j) => {
-          let mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+          let mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
           cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
           let m = new cv.Mat();
           cv.bitwise_and(gray, mask, m);
@@ -87,10 +93,11 @@
           if (cnt > maxVal) { maxVal = cnt; maxIdx = j; }
           m.delete(); mask.delete();
         });
+
         let correct = ANSWER_KEY[qi];
         let center = new cv.Point(
-          row[maxIdx].rect.x + row[maxIdx].rect.width / 2,
-          row[maxIdx].rect.y + row[maxIdx].rect.height / 2
+          row[maxIdx].rect.x + row[maxIdx].rect.width/2,
+          row[maxIdx].rect.y + row[maxIdx].rect.height/2
         );
         let color = (maxIdx === correct) ? [0,255,0] : [0,0,255];
         cv.circle(out, center, row[maxIdx].rect.width / 2, color, 4);
@@ -101,7 +108,7 @@
       notaDiv.innerText = `Acertos: ${correctCount}/${Object.keys(ANSWER_KEY).length} — Nota: ${((correctCount/Object.keys(ANSWER_KEY).length)*100).toFixed(1)}%`;
 
       cnts.delete(); hierarchy.delete();
-      let delay = 1000/FPS - (Date.now() - begin);
+      let delay = 1000 / FPS - (Date.now() - begin);
       setTimeout(processVideo, delay);
     }
 
