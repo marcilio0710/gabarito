@@ -3,20 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <title>Corretor OMR</title>
-  <script src="https://docs.opencv.org/4.8.0/opencv.js" onerror="alert('Erro ao carregar OpenCV!')"></script>
+  <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body { font-family: sans-serif; text-align: center; }
     video, canvas { width:90%; max-width:400px; margin:10px auto; display: block; }
-    #nota { font-size:1.2em; margin:10px; color: red; }
-    #status { font-weight: bold; }
+    #nota { font-size:1.2em; margin:10px; }
+    #status { font-weight: bold; color: #333; }
+    .error { color: red; }
   </style>
 </head>
 <body>
-  <h1>Corretor OMRr</h1>
-  <div id="status">Status: Inicializando...</div>
+  <h1>Corretor OMR</h1>
+  <div id="status">Iniciando...</div>
   <video id="videoInput" autoplay playsinline muted></video>
   <canvas id="canvasOutput"></canvas>
-  <div id="nota">Aguardando câmera...</div>
+  <div id="nota">Aguardando inicialização...</div>
 
   <script>
     const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1,5:4,6:3,7:2,8:1,9:0};
@@ -25,118 +26,149 @@
     const outC = document.getElementById('canvasOutput');
     const nota = document.getElementById('nota');
     const statusDiv = document.getElementById('status');
-    const hidden = document.createElement('canvas');
-    const hctx = hidden.getContext('2d');
+    
     let cap, src, gray, out;
+    let processing = false;
+    let videoWidth = 0, videoHeight = 0;
 
-    function updateStatus(message) {
-      statusDiv.textContent = "Status: " + message;
-      console.log(message);
-    }
-
-    function showError(message) {
-      nota.style.color = 'red';
-      nota.textContent = "ERRO: " + message;
-      updateStatus(message);
+    function updateStatus(message, isError = false) {
+      statusDiv.textContent = message;
+      if (isError) {
+        statusDiv.className = 'error';
+        console.error(message);
+      } else {
+        statusDiv.className = '';
+        console.log(message);
+      }
     }
 
     function startCamera() {
-      updateStatus("Solicitando permissão da câmera...");
+      updateStatus("Solicitando acesso à câmera...");
       
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-        .then(stream => {
-          video.srcObject = stream;
-          video.play().then(() => {
-            updateStatus("Câmera iniciada, aguardando OpenCV...");
-          }).catch(e => {
-            showError("Falha ao reproduzir vídeo: " + e.message);
-          });
-        })
-        .catch(e => {
-          showError("Acesso à câmera negado: " + e.message);
+      navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      })
+      .then(stream => {
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          updateStatus("Câmera pronta, ajustando dimensões...");
+          // Força o redimensionamento inicial
+          setTimeout(checkVideoDimensions, 100);
+        };
+        video.play().catch(e => {
+          updateStatus("Erro ao reproduzir vídeo: " + e.message, true);
         });
+      })
+      .catch(e => {
+        updateStatus("Erro na câmera: " + e.message, true);
+      });
     }
 
-    function onOpenCvReady() {
-      updateStatus("OpenCV carregado!");
-      
-      if (!cv || !cv.Mat) {
-        showError("OpenCV não está funcionando corretamente");
-        return;
-      }
-
-      // Verifica se a câmera já está pronta
-      if (video.readyState >= 2) {
-        setupVideoProcessing();
-      } else {
-        video.addEventListener('canplay', setupVideoProcessing, { once: true });
-        video.addEventListener('error', () => {
-          showError("Erro no elemento de vídeo");
-        });
+    function checkVideoDimensions() {
+      if (video.videoWidth !== videoWidth || video.videoHeight !== videoHeight) {
+        videoWidth = video.videoWidth;
+        videoHeight = video.videoHeight;
         
-        // Timeout de segurança
-        setTimeout(() => {
-          if (!cap) {
-            showError("Tempo limite de espera da câmera excedido");
-          }
-        }, 5000);
+        updateStatus(`Dimensões do vídeo: ${videoWidth}x${videoHeight}`);
+        initializeOpenCV();
+      }
+      
+      // Verifica continuamente por mudanças (útil para mobile quando rodação muda)
+      if (!processing) {
+        setTimeout(checkVideoDimensions, 500);
       }
     }
 
-    function setupVideoProcessing() {
-      updateStatus("Configurando processamento de vídeo...");
-      
+    function initializeOpenCV() {
       try {
-        hidden.width = video.videoWidth;
-        hidden.height = video.videoHeight;
-        outC.width = video.videoWidth;
-        outC.height = video.videoHeight;
+        // Cria canvas temporário com as mesmas dimensões do vídeo
+        const hidden = document.createElement('canvas');
+        hidden.width = videoWidth;
+        hidden.height = videoHeight;
+        const hctx = hidden.getContext('2d');
         
+        // Configura canvas de saída
+        outC.width = videoWidth;
+        outC.height = videoHeight;
+        
+        // Inicializa matrizes do OpenCV
         cap = new cv.VideoCapture(video);
-        src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+        src = new cv.Mat(videoHeight, videoWidth, cv.CV_8UC4);
         gray = new cv.Mat();
-        out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
+        out = new cv.Mat.zeros(videoHeight, videoWidth, cv.CV_8UC3);
         
-        updateStatus("Processando vídeo...");
+        updateStatus("Processando gabarito...");
         nota.textContent = "Aponte para o gabarito";
-        nota.style.color = 'black';
         
-        processVideo();
+        processing = true;
+        processVideo(hidden, hctx);
       } catch (e) {
-        showError("Erro na configuração: " + e.message);
+        updateStatus("Erro na inicialização: " + e.message, true);
       }
     }
 
-    function processVideo() {
+    function processVideo(hidden, hctx) {
+      if (!processing) return;
+      
       try {
-        hctx.drawImage(video, 0, 0, hidden.width, hidden.height);
+        // Atualiza dimensões se necessário
+        if (video.videoWidth !== videoWidth || video.videoHeight !== videoHeight) {
+          videoWidth = video.videoWidth;
+          videoHeight = video.videoHeight;
+          src.delete();
+          src = new cv.Mat(videoHeight, videoWidth, cv.CV_8UC4);
+        }
+        
+        // Captura frame
+        hctx.drawImage(video, 0, 0, videoWidth, videoHeight);
         cap.read(src);
         
         if (src.empty()) {
-          console.warn('Frame vazio');
-          setTimeout(processVideo, 1000/FPS);
+          setTimeout(() => processVideo(hidden, hctx), 1000/FPS);
           return;
         }
-
-        // Seu código de processamento de imagem continua aqui...
-        // ... (mantenha o restante do seu código de processamento)
-
-        setTimeout(processVideo, 1000/FPS);
+        
+        // Seu processamento de imagem aqui (exemplo simplificado)
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        cv.threshold(gray, gray, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
+        
+        // Mostra resultado
+        cv.imshow(outC, gray);
+        
+        // Atualiza status
+        nota.textContent = "Processando...";
+        
+        // Próximo frame
+        setTimeout(() => processVideo(hidden, hctx), 1000/FPS);
       } catch (e) {
-        showError("Erro no processamento: " + e.message);
+        updateStatus("Erro no processamento: " + e.message, true);
+        processing = false;
       }
     }
 
-    // Verifica se OpenCV já está carregado
-    if (window.cv) {
-      cv['onRuntimeInitialized'] = onOpenCvReady;
-    } else {
-      updateStatus("Aguardando carregamento do OpenCV...");
-      window.onOpenCvReady = onOpenCvReady;
+    // Inicialização quando OpenCV estiver pronto
+    function onOpenCvReady() {
+      updateStatus("OpenCV carregado com sucesso!");
+      startCamera();
     }
 
-    // Inicia o processo
-    startCamera();
+    // Configura callback do OpenCV
+    if (window.cv) {
+      cv.onRuntimeInitialized = onOpenCvReady;
+    } else {
+      updateStatus("Aguardando OpenCV...");
+      window.addEventListener('load', () => {
+        if (window.cv) {
+          cv.onRuntimeInitialized = onOpenCvReady;
+        } else {
+          updateStatus("Falha ao carregar OpenCV!", true);
+        }
+      });
+    }
   </script>
 </body>
 </html>
