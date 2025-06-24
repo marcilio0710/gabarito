@@ -2,297 +2,189 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Corretor OMR - Versão Final Funcional</title>
+  <title>Corretor OMR - Versão Ultra Precisão</title>
   <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f5f5f5;
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    .camera-box {
-      background-color: white;
-      border-radius: 10px;
+    /* (Mantenha todos os estilos anteriores) */
+    .advanced-controls {
+      background-color: #f8f9fa;
       padding: 15px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-      margin-bottom: 20px;
-      position: relative;
-    }
-    video, canvas {
-      width: 100%;
       border-radius: 8px;
-      display: block;
-      margin: 0 auto;
-    }
-    #captureBtn {
-      display: block;
-      width: 200px;
-      margin: 15px auto;
-      padding: 12px;
-      background-color: #4285f4;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      font-size: 16px;
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-    #captureBtn:hover {
-      background-color: #3367d6;
-    }
-    #captureBtn:disabled {
-      background-color: #cccccc;
-      cursor: not-allowed;
-    }
-    .status-box {
-      padding: 12px;
-      border-radius: 5px;
-      margin-bottom: 15px;
-      font-weight: 500;
-    }
-    .status-ready {
-      background-color: #e8f5e9;
-      color: #2e7d32;
-    }
-    .status-error {
-      background-color: #ffebee;
-      color: #c62828;
-    }
-    .results-box {
-      background-color: white;
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-    .results-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 15px;
-    }
-    .results-table th, .results-table td {
-      padding: 10px;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-    }
-    .results-table th {
-      background-color: #f9f9f9;
-    }
-    .correct {
-      color: #388e3c;
-    }
-    .incorrect {
-      color: #d32f2f;
-    }
-    .summary {
-      font-size: 18px;
-      font-weight: bold;
       margin: 15px 0;
-      text-align: center;
     }
-    .debug-info {
-      margin-top: 20px;
-      padding: 10px;
-      background-color: #f0f0f0;
-      border-radius: 5px;
-      font-family: monospace;
+    .slider-container {
+      margin: 10px 0;
+    }
+    .slider-container label {
+      display: inline-block;
+      width: 200px;
+      font-weight: bold;
+    }
+    .slider-container input[type="range"] {
+      width: 300px;
+      vertical-align: middle;
+    }
+    .slider-container span {
+      display: inline-block;
+      width: 60px;
+      text-align: right;
+      margin-left: 10px;
     }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>Corretor Automático de Gabaritos</h1>
-    <p>Gabarito Configurado: 1-A, 2-A, 3-B, 4-B, 5-C, 6-C, 7-D, 8-D, 9-C, 10-C</p>
-  </div>
+  <!-- (Mantenha a estrutura HTML anterior) -->
 
-  <div class="status-box" id="status">Inicializando sistema...</div>
-
-  <div class="camera-box">
-    <video id="videoInput" autoplay playsinline muted></video>
-    <canvas id="canvasOutput"></canvas>
-    <button id="captureBtn" disabled>Capturar Gabarito</button>
-  </div>
-
-  <div class="results-box">
-    <h2>Resultados</h2>
-    <div id="results">Aguardando processamento do gabarito...</div>
-    <div class="debug-info" id="debugInfo"></div>
+  <div class="advanced-controls">
+    <h3>Controles Avançados</h3>
+    <div class="slider-container">
+      <label for="minFillSlider">Sensibilidade de Preenchimento:</label>
+      <input type="range" id="minFillSlider" min="10" max="90" value="40">
+      <span id="minFillValue">40%</span>
+    </div>
+    <div class="slider-container">
+      <label for="colorThresholdSlider">Sensibilidade à Cor:</label>
+      <input type="range" id="colorThresholdSlider" min="0" max="100" value="30">
+      <span id="colorThresholdValue">30</span>
+    </div>
+    <div class="slider-container">
+      <label for="contrastSlider">Contraste:</label>
+      <input type="range" id="contrastSlider" min="0" max="200" value="100">
+      <span id="contrastValue">100%</span>
+    </div>
+    <button id="applySettings">Aplicar Configurações</button>
   </div>
 
   <script>
-    // CONFIGURAÇÃO DO GABARITO
-    const CONFIG = {
+    // CONFIGURAÇÃO INICIAL DO GABARITO
+    const DEFAULT_CONFIG = {
       answerKey: {
         0: 0, 1: 0, 2: 1, 3: 1, 4: 2,
         5: 2, 6: 3, 7: 3, 8: 2, 9: 2
       },
       optionsPerQuestion: 5,
-      minBubbleArea: 150,
-      maxBubbleArea: 3000,
-      minFillPercentage: 30,
+      minBubbleArea: 100,
+      maxBubbleArea: 3500,
+      minFillPercentage: 40,
       maxLineHeightVariation: 25,
-      thresholdBlockSize: 31,
-      thresholdConstant: 7,
-      morphKernelSize: 3
+      colorThreshold: 30,
+      contrastLevel: 100,
+      blueDetection: true,
+      blackDetection: true,
+      morphIterations: 2
     };
 
     // Elementos da interface
     const elements = {
-      video: document.getElementById('videoInput'),
-      canvas: document.getElementById('canvasOutput'),
-      ctx: document.getElementById('canvasOutput').getContext('2d'),
-      status: document.getElementById('status'),
-      results: document.getElementById('results'),
-      captureBtn: document.getElementById('captureBtn'),
-      debugInfo: document.getElementById('debugInfo')
+      // (Mantenha elementos anteriores)
+      minFillSlider: document.getElementById('minFillSlider'),
+      minFillValue: document.getElementById('minFillValue'),
+      colorThresholdSlider: document.getElementById('colorThresholdSlider'),
+      colorThresholdValue: document.getElementById('colorThresholdValue'),
+      contrastSlider: document.getElementById('contrastSlider'),
+      contrastValue: document.getElementById('contrastValue'),
+      applySettings: document.getElementById('applySettings')
     };
 
     // Estado do sistema
     const state = {
-      stream: null,
-      processing: false,
-      openCvReady: false,
-      cameraReady: false,
-      videoDimensions: { width: 0, height: 0 },
-      binary: null,
-      debugData: []
+      // (Mantenha estado anterior)
+      config: {...DEFAULT_CONFIG},
+      lastProcessedImage: null
     };
 
     // Funções principais
     const app = {
-      init: function() {
-        this.setupOpenCV();
-        this.initCamera();
-        this.setupEventListeners();
-      },
-
-      setupOpenCV: function() {
-        if (window.cv) {
-          cv.onRuntimeInitialized = this.onOpenCVReady.bind(this);
-        } else {
-          window.cv = { onRuntimeInitialized: this.onOpenCVReady.bind(this) };
-          elements.status.textContent = "Carregando OpenCV...";
-        }
-      },
-
-      initCamera: async function() {
-        elements.status.textContent = "Iniciando câmera...";
-        
-        try {
-          state.stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: 'environment',
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
-            }
-          });
-          
-          elements.video.srcObject = state.stream;
-          
-          elements.video.onloadedmetadata = () => {
-            state.videoDimensions.width = elements.video.videoWidth;
-            state.videoDimensions.height = elements.video.videoHeight;
-            state.cameraReady = true;
-            this.updateSystemStatus();
-          };
-          
-        } catch (error) {
-          this.showError(`Erro na câmera: ${error.message}`);
-        }
-      },
-
-      onOpenCVReady: function() {
-        state.openCvReady = true;
-        this.updateSystemStatus();
-      },
-
-      updateSystemStatus: function() {
-        if (state.cameraReady && state.openCvReady) {
-          elements.status.textContent = "Sistema pronto para uso";
-          elements.status.className = "status-box status-ready";
-          elements.captureBtn.disabled = false;
-        } else if (!state.cameraReady && !state.openCvReady) {
-          elements.status.textContent = "Inicializando câmera e OpenCV...";
-          elements.status.className = "status-box";
-        } else if (!state.cameraReady) {
-          elements.status.textContent = "Aguardando inicialização da câmera...";
-          elements.status.className = "status-box";
-        } else {
-          elements.status.textContent = "Aguardando carregamento do OpenCV...";
-          elements.status.className = "status-box";
-        }
-      },
-
-      processAnswerSheet: async function() {
-        if (state.processing) return;
-        
-        state.processing = true;
-        elements.captureBtn.disabled = true;
-        elements.status.textContent = "Processando gabarito...";
-        elements.status.className = "status-box";
-        state.debugData = [];
-        
-        try {
-          elements.canvas.width = state.videoDimensions.width;
-          elements.canvas.height = state.videoDimensions.height;
-          elements.ctx.drawImage(elements.video, 0, 0, elements.canvas.width, elements.canvas.height);
-          
-          const results = await this.processImageWithOpenCV(elements.canvas);
-          this.displayResults(results);
-          this.displayDebugInfo();
-          
-        } catch (error) {
-          this.showError(`Erro no processamento: ${error.message}`);
-        } finally {
-          state.processing = false;
-          elements.captureBtn.disabled = false;
-        }
-      },
+      // (Mantenha funções init, setupOpenCV, initCamera, etc.)
 
       processImageWithOpenCV: function(canvas) {
         return new Promise((resolve, reject) => {
           try {
             const src = cv.imread(canvas);
-            const gray = new cv.Mat();
-            const binary = new cv.Mat();
-            const contours = new cv.MatVector();
-            const hierarchy = new cv.Mat();
+            state.lastProcessedImage = src.clone();
             
-            // Pré-processamento
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            // Aplica contraste
+            const contrasted = new cv.Mat();
+            src.convertTo(contrasted, -1, state.config.contrastLevel/100, 0);
+            
+            // Pré-processamento para detecção de cor
+            const hsv = new cv.Mat();
+            cv.cvtColor(contrasted, hsv, cv.COLOR_RGBA2RGB);
+            cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+            
+            // Detecta azul (matizes entre 90-130)
+            const blueMask = new cv.Mat();
+            if (state.config.blueDetection) {
+              const lowBlue = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [90, 70, 50, 0]);
+              const highBlue = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [130, 255, 255, 0]);
+              cv.inRange(hsv, lowBlue, highBlue, blueMask);
+              lowBlue.delete();
+              highBlue.delete();
+            }
+            
+            // Detecta preto (matiz irrelevante, baixo valor)
+            const blackMask = new cv.Mat();
+            if (state.config.blackDetection) {
+              const lowBlack = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, 0, 0]);
+              const highBlack = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), 
+                [180, 255, state.config.colorThreshold, 0]);
+              cv.inRange(hsv, lowBlack, highBlack, blackMask);
+              lowBlack.delete();
+              highBlack.delete();
+            }
+            
+            // Combina máscaras
+            const colorMask = new cv.Mat();
+            if (state.config.blueDetection && state.config.blackDetection) {
+              cv.bitwise_or(blueMask, blackMask, colorMask);
+            } else if (state.config.blueDetection) {
+              colorMask = blueMask.clone();
+            } else {
+              colorMask = blackMask.clone();
+            }
+            
+            // Processamento tradicional para formas
+            const gray = new cv.Mat();
+            cv.cvtColor(contrasted, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
             
-            // Threshold adaptativo
+            const binary = new cv.Mat();
             cv.adaptiveThreshold(gray, binary, 255, 
                                cv.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                cv.THRESH_BINARY_INV, 
-                               CONFIG.thresholdBlockSize, 
-                               CONFIG.thresholdConstant);
+                               31, 7);
+            
+            // Combina detecção de cor com detecção de forma
+            const combined = new cv.Mat();
+            cv.bitwise_and(binary, colorMask, combined);
             
             // Operações morfológicas
-            const kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, 
-                          new cv.Size(CONFIG.morphKernelSize, CONFIG.morphKernelSize));
-            cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
+            const kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+            cv.morphologyEx(combined, combined, cv.MORPH_CLOSE, kernel, 
+                          new cv.Point(-1, -1), state.config.morphIterations);
             
-            state.binary = binary.clone();
-            cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            // Encontra contornos
+            const contours = new cv.MatVector();
+            const hierarchy = new cv.Mat();
+            cv.findContours(combined, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
             
             const bubbles = this.filterBubbles(contours);
             const sortedBubbles = this.sortBubbles(bubbles);
             const results = this.processAnswers(sortedBubbles);
             
-            this.drawResults(src, sortedBubbles, results);
-            cv.imshow(canvas, src);
+            this.drawResults(contrasted, sortedBubbles, results);
+            cv.imshow(canvas, contrasted);
             
             // Liberar memória
             src.delete();
+            contrasted.delete();
+            hsv.delete();
+            blueMask.delete();
+            blackMask.delete();
+            colorMask.delete();
             gray.delete();
             binary.delete();
+            combined.delete();
             contours.delete();
             hierarchy.delete();
             kernel.delete();
@@ -305,101 +197,6 @@
         });
       },
 
-      filterBubbles: function(contours) {
-        const bubbles = [];
-        
-        for (let i = 0; i < contours.size(); i++) {
-          const contour = contours.get(i);
-          const rect = cv.boundingRect(contour);
-          const area = rect.width * rect.height;
-          const aspectRatio = rect.width / rect.height;
-          
-          if (area > CONFIG.minBubbleArea && 
-              area < CONFIG.maxBubbleArea &&
-              aspectRatio > 0.7 && aspectRatio < 1.4) {
-            bubbles.push({
-              contour,
-              rect,
-              center: { x: rect.x + rect.width/2, y: rect.y + rect.height/2 },
-              area
-            });
-          }
-        }
-        
-        return bubbles;
-      },
-
-      sortBubbles: function(bubbles) {
-        if (bubbles.length === 0) return bubbles;
-        
-        // Primeiro ordena por posição Y (linhas)
-        bubbles.sort((a, b) => a.center.y - b.center.y);
-        
-        // Agrupa por linhas
-        const rows = [];
-        let currentRow = [bubbles[0]];
-        
-        for (let i = 1; i < bubbles.length; i++) {
-          const prevCenterY = currentRow[currentRow.length-1].center.y;
-          const currCenterY = bubbles[i].center.y;
-          
-          if (Math.abs(currCenterY - prevCenterY) < CONFIG.maxLineHeightVariation) {
-            currentRow.push(bubbles[i]);
-          } else {
-            // Ordena cada linha por posição X (colunas)
-            currentRow.sort((a, b) => a.center.x - b.center.x);
-            rows.push(currentRow);
-            currentRow = [bubbles[i]];
-          }
-        }
-        
-        if (currentRow.length > 0) {
-          currentRow.sort((a, b) => a.center.x - b.center.x);
-          rows.push(currentRow);
-        }
-        
-        return rows.flat();
-      },
-
-      processAnswers: function(bubbles) {
-        const results = [];
-        let correctCount = 0;
-        
-        // Agrupa bolhas por questão
-        const questions = [];
-        const questionsCount = Math.ceil(bubbles.length / CONFIG.optionsPerQuestion);
-        
-        for (let q = 0; q < questionsCount; q++) {
-          const startIdx = q * CONFIG.optionsPerQuestion;
-          const endIdx = startIdx + CONFIG.optionsPerQuestion;
-          questions.push(bubbles.slice(startIdx, endIdx));
-        }
-        
-        // Processa cada questão
-        questions.forEach((questionBubbles, qIndex) => {
-          if (qIndex >= Object.keys(CONFIG.answerKey).length) return;
-          
-          const markedIndex = this.detectMarkedBubble(questionBubbles, qIndex);
-          const isCorrect = markedIndex === CONFIG.answerKey[qIndex];
-          
-          if (isCorrect) correctCount++;
-          
-          results.push({
-            question: qIndex + 1,
-            marked: markedIndex !== -1 ? this.indexToLetter(markedIndex) : '-',
-            correct: this.indexToLetter(CONFIG.answerKey[qIndex]),
-            isCorrect,
-            debug: state.debugData[qIndex] || {}
-          });
-        });
-        
-        return { answers: results, correctCount };
-      },
-
-      indexToLetter: function(index) {
-        return String.fromCharCode(65 + index); // 0=A, 1=B, etc.
-      },
-
       detectMarkedBubble: function(bubbles, qIndex) {
         let markedIndex = -1;
         let maxFill = 0;
@@ -409,25 +206,34 @@
           const contourVector = new cv.MatVector();
           contourVector.push_back(bubble.contour);
           
-          const mask = new cv.Mat.zeros(state.binary.rows, state.binary.cols, cv.CV_8UC1);
+          const mask = new cv.Mat.zeros(state.lastProcessedImage.rows, 
+                                      state.lastProcessedImage.cols, cv.CV_8UC1);
           cv.drawContours(mask, contourVector, -1, new cv.Scalar(255, 255, 255, 255), -1);
           
-          const masked = new cv.Mat();
-          cv.bitwise_and(state.binary, mask, masked);
+          // Analisa a região dentro do contorno
+          const roi = new cv.Mat();
+          state.lastProcessedImage.copyTo(roi, mask);
           
-          const fillPixels = cv.countNonZero(masked);
-          const bubbleArea = cv.contourArea(bubble.contour);
-          const fillPercentage = (fillPixels / bubbleArea) * 100;
+          // Converte para HSV para análise de cor
+          const hsvRoi = new cv.Mat();
+          cv.cvtColor(roi, hsvRoi, cv.COLOR_RGBA2RGB);
+          cv.cvtColor(hsvRoi, hsvRoi, cv.COLOR_RGB2HSV);
+          
+          // Calcula a média do valor (V no HSV) que indica quão escura está a região
+          const meanValue = cv.mean(hsvRoi)[2];
+          const fillPercentage = 100 - (meanValue / 255 * 100);
           
           debugInfo[`Q${qIndex+1}-${this.indexToLetter(index)}`] = `${fillPercentage.toFixed(1)}%`;
           
-          if (fillPercentage > CONFIG.minFillPercentage && fillPercentage > maxFill) {
+          if (fillPercentage > state.config.minFillPercentage && fillPercentage > maxFill) {
             maxFill = fillPercentage;
             markedIndex = index;
           }
           
+          // Liberar memória
           mask.delete();
-          masked.delete();
+          roi.delete();
+          hsvRoi.delete();
           contourVector.delete();
         });
         
@@ -435,97 +241,30 @@
         return markedIndex;
       },
 
-      drawResults: function(src, bubbles, results) {
-        bubbles.forEach((bubble, i) => {
-          const qIndex = Math.floor(i / CONFIG.optionsPerQuestion);
-          if (qIndex >= results.answers.length) return;
-          
-          const answer = results.answers[qIndex];
-          const optionIndex = i % CONFIG.optionsPerQuestion;
-          
-          if (optionIndex === answer.marked.charCodeAt(0) - 65 || answer.marked === '-') {
-            const color = answer.isCorrect 
-              ? new cv.Scalar(0, 255, 0, 255)  // Verde para correto
-              : new cv.Scalar(0, 0, 255, 255);  // Vermelho para incorreto
-            
-            const thickness = 2;
-            const contourVector = new cv.MatVector();
-            contourVector.push_back(bubble.contour);
-            cv.drawContours(src, contourVector, -1, color, thickness);
-            contourVector.delete();
-          }
-        });
-      },
-
-      displayResults: function(results) {
-        const totalQuestions = Object.keys(CONFIG.answerKey).length;
-        const score = Math.round((results.correctCount / totalQuestions) * 100);
-        
-        let html = `
-          <div class="summary">
-            Pontuação: ${results.correctCount}/${totalQuestions} (${score}%)
-          </div>
-          <table class="results-table">
-            <thead>
-              <tr>
-                <th>Questão</th>
-                <th>Sua Resposta</th>
-                <th>Resposta Correta</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-        `;
-        
-        results.answers.forEach(answer => {
-          html += `
-            <tr>
-              <td>${answer.question}</td>
-              <td>${answer.marked}</td>
-              <td>${answer.correct}</td>
-              <td class="${answer.isCorrect ? 'correct' : 'incorrect'}">
-                ${answer.isCorrect ? '✓' : '✗'}
-              </td>
-            </tr>
-          `;
-        });
-        
-        html += `</tbody></table>`;
-        elements.results.innerHTML = html;
-        elements.status.textContent = "Processamento concluído com sucesso!";
-        elements.status.className = "status-box status-ready";
-      },
-
-      displayDebugInfo: function() {
-        let debugHtml = "<h3>Informações de Debug:</h3><ul>";
-        
-        state.debugData.forEach((questionDebug, qIndex) => {
-          debugHtml += `<li><strong>Questão ${qIndex + 1}:</strong> `;
-          debugHtml += Object.entries(questionDebug)
-            .map(([key, value]) => `${key}=${value}`)
-            .join(", ");
-          debugHtml += "</li>";
-        });
-        
-        debugHtml += "</ul>";
-        elements.debugInfo.innerHTML = debugHtml;
-      },
-
-      showError: function(message) {
-        elements.status.textContent = message;
-        elements.status.className = "status-box status-error";
-        console.error(message);
-      },
+      // (Mantenha as outras funções)
 
       setupEventListeners: function() {
-        elements.captureBtn.addEventListener('click', () => this.processAnswerSheet());
+        // (Mantenha listeners anteriores)
         
-        window.addEventListener('beforeunload', () => {
-          if (state.stream) {
-            state.stream.getTracks().forEach(track => track.stop());
-          }
-          if (state.binary) {
-            state.binary.delete();
+        // Controles avançados
+        elements.minFillSlider.addEventListener('input', (e) => {
+          state.config.minFillPercentage = parseInt(e.target.value);
+          elements.minFillValue.textContent = `${state.config.minFillPercentage}%`;
+        });
+        
+        elements.colorThresholdSlider.addEventListener('input', (e) => {
+          state.config.colorThreshold = parseInt(e.target.value);
+          elements.colorThresholdValue.textContent = state.config.colorThreshold;
+        });
+        
+        elements.contrastSlider.addEventListener('input', (e) => {
+          state.config.contrastLevel = parseInt(e.target.value);
+          elements.contrastValue.textContent = `${state.config.contrastLevel}%`;
+        });
+        
+        elements.applySettings.addEventListener('click', () => {
+          if (state.lastProcessedImage) {
+            this.processAnswerSheet();
           }
         });
       }
