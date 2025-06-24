@@ -2,10 +2,106 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Corretor OMR - Versão Ultra Precisão</title>
+  <title>Corretor OMR - Detecção Ultra Precisão</title>
   <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
-    /* (Mantenha todos os estilos anteriores) */
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .camera-box {
+      background-color: white;
+      border-radius: 10px;
+      padding: 15px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+      position: relative;
+    }
+    video, canvas {
+      width: 100%;
+      border-radius: 8px;
+      display: block;
+      margin: 0 auto;
+    }
+    #captureBtn {
+      display: block;
+      width: 200px;
+      margin: 15px auto;
+      padding: 12px;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    #captureBtn:hover {
+      background-color: #3367d6;
+    }
+    #captureBtn:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .status-box {
+      padding: 12px;
+      border-radius: 5px;
+      margin-bottom: 15px;
+      font-weight: 500;
+    }
+    .status-ready {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+    }
+    .status-error {
+      background-color: #ffebee;
+      color: #c62828;
+    }
+    .results-box {
+      background-color: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+    .results-table th, .results-table td {
+      padding: 10px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    .results-table th {
+      background-color: #f9f9f9;
+    }
+    .correct {
+      color: #388e3c;
+    }
+    .incorrect {
+      color: #d32f2f;
+    }
+    .summary {
+      font-size: 18px;
+      font-weight: bold;
+      margin: 15px 0;
+      text-align: center;
+    }
+    .debug-info {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #f0f0f0;
+      border-radius: 5px;
+      font-family: monospace;
+    }
     .advanced-controls {
       background-color: #f8f9fa;
       padding: 15px;
@@ -33,10 +129,21 @@
   </style>
 </head>
 <body>
-  <!-- (Mantenha a estrutura HTML anterior) -->
+  <div class="header">
+    <h1>Corretor Automático de Gabaritos</h1>
+    <p>Gabarito Configurado: 1-A, 2-A, 3-B, 4-B, 5-C, 6-C, 7-D, 8-D, 9-C, 10-C</p>
+  </div>
+
+  <div class="status-box" id="status">Inicializando sistema...</div>
+
+  <div class="camera-box">
+    <video id="videoInput" autoplay playsinline muted></video>
+    <canvas id="canvasOutput"></canvas>
+    <button id="captureBtn" disabled>Capturar Gabarito</button>
+  </div>
 
   <div class="advanced-controls">
-    <h3>Controles Avançados</h3>
+    <h3>🔧 Controles Avançados</h3>
     <div class="slider-container">
       <label for="minFillSlider">Sensibilidade de Preenchimento:</label>
       <input type="range" id="minFillSlider" min="10" max="90" value="40">
@@ -49,14 +156,20 @@
     </div>
     <div class="slider-container">
       <label for="contrastSlider">Contraste:</label>
-      <input type="range" id="contrastSlider" min="0" max="200" value="100">
+      <input type="range" id="contrastSlider" min="50" max="200" value="100">
       <span id="contrastValue">100%</span>
     </div>
     <button id="applySettings">Aplicar Configurações</button>
   </div>
 
+  <div class="results-box">
+    <h2>📊 Resultados</h2>
+    <div id="results">Aguardando processamento do gabarito...</div>
+    <div class="debug-info" id="debugInfo"></div>
+  </div>
+
   <script>
-    // CONFIGURAÇÃO INICIAL DO GABARITO
+    // CONFIGURAÇÃO INICIAL
     const DEFAULT_CONFIG = {
       answerKey: {
         0: 0, 1: 0, 2: 1, 3: 1, 4: 2,
@@ -76,7 +189,13 @@
 
     // Elementos da interface
     const elements = {
-      // (Mantenha elementos anteriores)
+      video: document.getElementById('videoInput'),
+      canvas: document.getElementById('canvasOutput'),
+      ctx: document.getElementById('canvasOutput').getContext('2d'),
+      status: document.getElementById('status'),
+      results: document.getElementById('results'),
+      captureBtn: document.getElementById('captureBtn'),
+      debugInfo: document.getElementById('debugInfo'),
       minFillSlider: document.getElementById('minFillSlider'),
       minFillValue: document.getElementById('minFillValue'),
       colorThresholdSlider: document.getElementById('colorThresholdSlider'),
@@ -88,14 +207,107 @@
 
     // Estado do sistema
     const state = {
-      // (Mantenha estado anterior)
+      stream: null,
+      processing: false,
+      openCvReady: false,
+      cameraReady: false,
+      videoDimensions: { width: 0, height: 0 },
+      binary: null,
+      debugData: [],
       config: {...DEFAULT_CONFIG},
       lastProcessedImage: null
     };
 
     // Funções principais
     const app = {
-      // (Mantenha funções init, setupOpenCV, initCamera, etc.)
+      init: function() {
+        this.setupOpenCV();
+        this.initCamera();
+        this.setupEventListeners();
+      },
+
+      setupOpenCV: function() {
+        if (window.cv) {
+          cv.onRuntimeInitialized = this.onOpenCVReady.bind(this);
+        } else {
+          window.cv = { onRuntimeInitialized: this.onOpenCVReady.bind(this) };
+          elements.status.textContent = "Carregando OpenCV...";
+        }
+      },
+
+      initCamera: async function() {
+        elements.status.textContent = "Iniciando câmera...";
+        
+        try {
+          state.stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          });
+          
+          elements.video.srcObject = state.stream;
+          
+          elements.video.onloadedmetadata = () => {
+            state.videoDimensions.width = elements.video.videoWidth;
+            state.videoDimensions.height = elements.video.videoHeight;
+            state.cameraReady = true;
+            this.updateSystemStatus();
+          };
+          
+        } catch (error) {
+          this.showError(`Erro na câmera: ${error.message}`);
+        }
+      },
+
+      onOpenCVReady: function() {
+        state.openCvReady = true;
+        this.updateSystemStatus();
+      },
+
+      updateSystemStatus: function() {
+        if (state.cameraReady && state.openCvReady) {
+          elements.status.textContent = "✅ Sistema pronto para uso";
+          elements.status.className = "status-box status-ready";
+          elements.captureBtn.disabled = false;
+        } else if (!state.cameraReady && !state.openCvReady) {
+          elements.status.textContent = "Inicializando câmera e OpenCV...";
+          elements.status.className = "status-box";
+        } else if (!state.cameraReady) {
+          elements.status.textContent = "Aguardando inicialização da câmera...";
+          elements.status.className = "status-box";
+        } else {
+          elements.status.textContent = "Aguardando carregamento do OpenCV...";
+          elements.status.className = "status-box";
+        }
+      },
+
+      processAnswerSheet: async function() {
+        if (state.processing) return;
+        
+        state.processing = true;
+        elements.captureBtn.disabled = true;
+        elements.status.textContent = "🔄 Processando gabarito...";
+        elements.status.className = "status-box";
+        state.debugData = [];
+        
+        try {
+          elements.canvas.width = state.videoDimensions.width;
+          elements.canvas.height = state.videoDimensions.height;
+          elements.ctx.drawImage(elements.video, 0, 0, elements.canvas.width, elements.canvas.height);
+          
+          const results = await this.processImageWithOpenCV(elements.canvas);
+          this.displayResults(results);
+          this.displayDebugInfo();
+          
+        } catch (error) {
+          this.showError(`Erro no processamento: ${error.message}`);
+        } finally {
+          state.processing = false;
+          elements.captureBtn.disabled = false;
+        }
+      },
 
       processImageWithOpenCV: function(canvas) {
         return new Promise((resolve, reject) => {
@@ -197,6 +409,101 @@
         });
       },
 
+      filterBubbles: function(contours) {
+        const bubbles = [];
+        
+        for (let i = 0; i < contours.size(); i++) {
+          const contour = contours.get(i);
+          const rect = cv.boundingRect(contour);
+          const area = rect.width * rect.height;
+          const aspectRatio = rect.width / rect.height;
+          
+          if (area > state.config.minBubbleArea && 
+              area < state.config.maxBubbleArea &&
+              aspectRatio > 0.7 && aspectRatio < 1.4) {
+            bubbles.push({
+              contour,
+              rect,
+              center: { x: rect.x + rect.width/2, y: rect.y + rect.height/2 },
+              area
+            });
+          }
+        }
+        
+        return bubbles;
+      },
+
+      sortBubbles: function(bubbles) {
+        if (bubbles.length === 0) return bubbles;
+        
+        // Primeiro ordena por posição Y (linhas)
+        bubbles.sort((a, b) => a.center.y - b.center.y);
+        
+        // Agrupa por linhas
+        const rows = [];
+        let currentRow = [bubbles[0]];
+        
+        for (let i = 1; i < bubbles.length; i++) {
+          const prevCenterY = currentRow[currentRow.length-1].center.y;
+          const currCenterY = bubbles[i].center.y;
+          
+          if (Math.abs(currCenterY - prevCenterY) < state.config.maxLineHeightVariation) {
+            currentRow.push(bubbles[i]);
+          } else {
+            // Ordena cada linha por posição X (colunas)
+            currentRow.sort((a, b) => a.center.x - b.center.x);
+            rows.push(currentRow);
+            currentRow = [bubbles[i]];
+          }
+        }
+        
+        if (currentRow.length > 0) {
+          currentRow.sort((a, b) => a.center.x - b.center.x);
+          rows.push(currentRow);
+        }
+        
+        return rows.flat();
+      },
+
+      processAnswers: function(bubbles) {
+        const results = [];
+        let correctCount = 0;
+        
+        // Agrupa bolhas por questão
+        const questions = [];
+        const questionsCount = Math.ceil(bubbles.length / state.config.optionsPerQuestion);
+        
+        for (let q = 0; q < questionsCount; q++) {
+          const startIdx = q * state.config.optionsPerQuestion;
+          const endIdx = startIdx + state.config.optionsPerQuestion;
+          questions.push(bubbles.slice(startIdx, endIdx));
+        }
+        
+        // Processa cada questão
+        questions.forEach((questionBubbles, qIndex) => {
+          if (qIndex >= Object.keys(state.config.answerKey).length) return;
+          
+          const markedIndex = this.detectMarkedBubble(questionBubbles, qIndex);
+          const isCorrect = markedIndex === state.config.answerKey[qIndex];
+          
+          if (isCorrect) correctCount++;
+          
+          results.push({
+            question: qIndex + 1,
+            marked: markedIndex !== -1 ? this.indexToLetter(markedIndex) : '-',
+            correct: this.indexToLetter(state.config.answerKey[qIndex]),
+            isCorrect,
+            debug: state.debugData[qIndex] || {}
+          });
+        });
+        
+        return { answers: results, correctCount };
+      },
+
+      indexToLetter: function(index) {
+        return String.fromCharCode(65 + index); // 0=A, 1=B, etc.
+      },
+
       detectMarkedBubble: function(bubbles, qIndex) {
         let markedIndex = -1;
         let maxFill = 0;
@@ -241,10 +548,90 @@
         return markedIndex;
       },
 
-      // (Mantenha as outras funções)
+      drawResults: function(src, bubbles, results) {
+        bubbles.forEach((bubble, i) => {
+          const qIndex = Math.floor(i / state.config.optionsPerQuestion);
+          if (qIndex >= results.answers.length) return;
+          
+          const answer = results.answers[qIndex];
+          const optionIndex = i % state.config.optionsPerQuestion;
+          
+          if (optionIndex === answer.marked.charCodeAt(0) - 65 || answer.marked === '-') {
+            const color = answer.isCorrect 
+              ? new cv.Scalar(0, 255, 0, 255)  // Verde para correto
+              : new cv.Scalar(0, 0, 255, 255);  // Vermelho para incorreto
+            
+            const thickness = 2;
+            const contourVector = new cv.MatVector();
+            contourVector.push_back(bubble.contour);
+            cv.drawContours(src, contourVector, -1, color, thickness);
+            contourVector.delete();
+          }
+        });
+      },
+
+      displayResults: function(results) {
+        const totalQuestions = Object.keys(state.config.answerKey).length;
+        const score = Math.round((results.correctCount / totalQuestions) * 100);
+        
+        let html = `
+          <div class="summary">
+            Pontuação: ${results.correctCount}/${totalQuestions} (${score}%)
+          </div>
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>Questão</th>
+                <th>Sua Resposta</th>
+                <th>Resposta Correta</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+        
+        results.answers.forEach(answer => {
+          html += `
+            <tr>
+              <td>${answer.question}</td>
+              <td>${answer.marked}</td>
+              <td>${answer.correct}</td>
+              <td class="${answer.isCorrect ? 'correct' : 'incorrect'}">
+                ${answer.isCorrect ? '✓' : '✗'}
+              </td>
+            </tr>
+          `;
+        });
+        
+        html += `</tbody></table>`;
+        elements.results.innerHTML = html;
+        elements.status.textContent = "✅ Processamento concluído com sucesso!";
+        elements.status.className = "status-box status-ready";
+      },
+
+      displayDebugInfo: function() {
+        let debugHtml = "<h3>🔍 Informações de Debug:</h3><ul>";
+        
+        state.debugData.forEach((questionDebug, qIndex) => {
+          debugHtml += `<li><strong>Questão ${qIndex + 1}:</strong> `;
+          debugHtml += Object.entries(questionDebug)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(", ");
+          debugHtml += "</li>";
+        });
+        
+        debugHtml += "</ul>";
+        elements.debugInfo.innerHTML = debugHtml;
+      },
+
+      showError: function(message) {
+        elements.status.textContent = message;
+        elements.status.className = "status-box status-error";
+        console.error(message);
+      },
 
       setupEventListeners: function() {
-        // (Mantenha listeners anteriores)
+        elements.captureBtn.addEventListener('click', () => this.processAnswerSheet());
         
         // Controles avançados
         elements.minFillSlider.addEventListener('input', (e) => {
@@ -265,6 +652,15 @@
         elements.applySettings.addEventListener('click', () => {
           if (state.lastProcessedImage) {
             this.processAnswerSheet();
+          }
+        });
+        
+        window.addEventListener('beforeunload', () => {
+          if (state.stream) {
+            state.stream.getTracks().forEach(track => track.stop());
+          }
+          if (state.binary) {
+            state.binary.delete();
           }
         });
       }
