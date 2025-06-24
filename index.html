@@ -29,7 +29,6 @@ let notaDiv = document.getElementById('nota');
 
 let cap, src, gray, out;
 
-// Função para iniciar a câmera
 function startCamera() {
   navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
     .then(stream => {
@@ -41,49 +40,49 @@ function startCamera() {
     });
 }
 
-// Quando o OpenCV estiver carregado
 function onOpenCvReady() {
   console.log('OpenCV pronto!');
   notaDiv.innerText = 'Carregando câmera...';
   startCamera();
 
-  // Quando o vídeo estiver pronto para ser usado
   video.addEventListener('canplay', () => {
     if (!cap) {
-      // Ajusta o tamanho do vídeo
       video.width = video.videoWidth;
       video.height = video.videoHeight;
 
-      // Inicializa as variáveis do OpenCV
       cap = new cv.VideoCapture(video);
       src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
       gray = new cv.Mat();
       out = new cv.Mat.zeros(video.videoHeight, video.videoWidth, cv.CV_8UC3);
 
       notaDiv.innerText = 'Captura ativa. Processando...';
-
-      // Começa o processamento contínuo
       processVideo();
     }
   });
 }
 
-// Função principal de processamento
 function processVideo() {
   if (!cap) return;
 
   const begin = Date.now();
 
-  // Leitura do frame
   cap.read(src);
-  // Convertendo para escala de cinza
+
+  // Verificação rápida: se a captura está funcionando
+  if (src.empty()) {
+    console.log('Imagem vazia, aguardando...');
+    setTimeout(processVideo, 100);
+    return;
+  }
+
+  // Converte para cinza
   cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  // Aplicando desfoque
-  cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
-  // Detecção de bordas
+  // Aplica desfoque suave
+  cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+  // Detecta bordas
   cv.Canny(gray, gray, 75, 200);
 
-  // Encontrar contornos
+  // Para verificar se os contornos estão sendo detectados
   const cnts = new cv.MatVector();
   const hierarchy = new cv.Mat();
   cv.findContours(gray, cnts, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -93,37 +92,35 @@ function processVideo() {
     const c = cnts.get(i);
     const r = cv.boundingRect(c);
     const ar = r.width / r.height;
-    // Filtrar por tamanho e formato
     if (r.width > 10 && r.height > 10 && ar > 0.8 && ar < 1.2) {
       bubbles.push({ ctr: c, rect: r });
     }
   }
+
+  // Debug: mostra quantidade de bolhas detectadas
   console.log('Bolhas detectadas:', bubbles.length);
 
-  // Ordenar bolhas por posição
+  // Organiza bolhas por posição
   bubbles.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
 
-  // Agrupar por questões (cada questão tem 5 opções)
+  // Agrupa por questões
   const rows = [];
   const choices = 5;
   for (let i = 0; i < bubbles.length; i += choices) {
     rows.push(bubbles.slice(i, i + choices));
   }
-  console.log('Linhas de questões:', rows.length);
 
   let correctCount = 0;
-  out.setTo(new cv.Scalar(0, 0, 0, 255)); // Limpa a saída
+  // Limpa a saída
+  out.setTo(new cv.Scalar(0, 0, 0, 255));
 
   // Para cada questão
   rows.forEach((row, qi) => {
-    // Para cada opção na questão
     let maxIdx = -1, maxVal = -1;
     for (let j = 0; j < row.length; j++) {
       const b = row[j];
-      // Cria máscara para a bolha
       const mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
       cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
-      // Aplica máscara na imagem cinza
       const m = new cv.Mat();
       cv.bitwise_and(gray, mask, m);
       const cnt = cv.countNonZero(m);
@@ -134,19 +131,16 @@ function processVideo() {
       m.delete(); mask.delete();
     }
 
-    // Verifica resposta correta
-    const answeredIdx = maxIdx;
-    const correctIdx = ANSWER_KEY[qi];
+    // Desenhar resposta na tela
+    if (maxIdx >= 0) {
+      const rect = row[maxIdx].rect;
+      const centerX = rect.x + rect.width / 2;
+      const centerY = rect.y + rect.height / 2;
+      // Cor verde se correta, vermelho se errada
+      const color = (maxIdx === ANSWER_KEY[qi]) ? [0, 255, 0, 255] : [0, 0, 255, 255];
+      cv.circle(out, new cv.Point(centerX, centerY), rect.width / 2, color, 4);
 
-    if (answeredIdx >= 0) {
-      // Desenha círculo na resposta
-      const centerX = row[answeredIdx].rect.x + row[answeredIdx].rect.width / 2;
-      const centerY = row[answeredIdx].rect.y + row[answeredIdx].rect.height / 2;
-      const color = (answeredIdx === correctIdx) ? [0, 255, 0, 255] : [0, 0, 255, 255];
-      cv.circle(out, new cv.Point(centerX, centerY), row[answeredIdx].rect.width / 2, color, 4);
-
-      // Incrementa acertos se estiver correto
-      if (answeredIdx === correctIdx) {
+      if (maxIdx === ANSWER_KEY[qi]) {
         correctCount++;
       }
     } else {
@@ -154,25 +148,27 @@ function processVideo() {
     }
   });
 
-  // Log de acertos por quadro
+  // Debug: mostrar quantidade de acertos no frame
   console.log('Acertos neste frame:', correctCount);
 
-  // Exibe a imagem no canvas
+  // Para garantir que o canvas funciona, desenhe um retângulo de teste
+  // cv.rectangle(out, new cv.Point(10, 10), new cv.Point(100, 100), [255, 0, 0, 255], 3);
+
+  // Exibe na tela
   cv.imshow(canvas, out);
 
-  // Atualiza a nota na tela
+  // Atualiza nota
   const total = Object.keys(ANSWER_KEY).length;
   notaDiv.innerText = `Acertos: ${correctCount}/${total} — Nota: ${((correctCount/total)*100).toFixed(1)}%`;
 
   // Libera memória
   cnts.delete(); hierarchy.delete();
 
-  // Agendamento próximo frame
+  // Próximo frame
   const delay = Math.max(0, 1000 / FPS - (Date.now() - begin));
   setTimeout(processVideo, delay);
 }
 
-// Quando o OpenCV estiver pronto
 cv['onRuntimeInitialized'] = onOpenCvReady;
 </script>
 </body>
