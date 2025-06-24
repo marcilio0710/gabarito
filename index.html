@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Corretor OMR - Versão Final Corrigida</title>
+  <title>Corretor OMR - Versão Final Funcional</title>
   <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body {
@@ -95,6 +95,13 @@
       margin: 15px 0;
       text-align: center;
     }
+    .debug-info {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #f0f0f0;
+      border-radius: 5px;
+      font-family: monospace;
+    }
   </style>
 </head>
 <body>
@@ -114,6 +121,7 @@
   <div class="results-box">
     <h2>Resultados</h2>
     <div id="results">Aguardando processamento do gabarito...</div>
+    <div class="debug-info" id="debugInfo"></div>
   </div>
 
   <script>
@@ -124,10 +132,13 @@
         5: 2, 6: 3, 7: 3, 8: 2, 9: 2
       },
       optionsPerQuestion: 5,
-      minBubbleArea: 200,
-      maxBubbleArea: 2500,
-      minFillPercentage: 40,
-      maxLineHeightVariation: 20
+      minBubbleArea: 150,
+      maxBubbleArea: 3000,
+      minFillPercentage: 30,
+      maxLineHeightVariation: 25,
+      thresholdBlockSize: 31,
+      thresholdConstant: 7,
+      morphKernelSize: 3
     };
 
     // Elementos da interface
@@ -137,7 +148,8 @@
       ctx: document.getElementById('canvasOutput').getContext('2d'),
       status: document.getElementById('status'),
       results: document.getElementById('results'),
-      captureBtn: document.getElementById('captureBtn')
+      captureBtn: document.getElementById('captureBtn'),
+      debugInfo: document.getElementById('debugInfo')
     };
 
     // Estado do sistema
@@ -147,7 +159,8 @@
       openCvReady: false,
       cameraReady: false,
       videoDimensions: { width: 0, height: 0 },
-      binary: null
+      binary: null,
+      debugData: []
     };
 
     // Funções principais
@@ -222,6 +235,7 @@
         elements.captureBtn.disabled = true;
         elements.status.textContent = "Processando gabarito...";
         elements.status.className = "status-box";
+        state.debugData = [];
         
         try {
           elements.canvas.width = state.videoDimensions.width;
@@ -230,6 +244,7 @@
           
           const results = await this.processImageWithOpenCV(elements.canvas);
           this.displayResults(results);
+          this.displayDebugInfo();
           
         } catch (error) {
           this.showError(`Erro no processamento: ${error.message}`);
@@ -248,11 +263,21 @@
             const contours = new cv.MatVector();
             const hierarchy = new cv.Mat();
             
+            // Pré-processamento
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+            
+            // Threshold adaptativo
             cv.adaptiveThreshold(gray, binary, 255, 
-                                cv.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                cv.THRESH_BINARY_INV, 11, 2);
+                               cv.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                               cv.THRESH_BINARY_INV, 
+                               CONFIG.thresholdBlockSize, 
+                               CONFIG.thresholdConstant);
+            
+            // Operações morfológicas
+            const kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, 
+                          new cv.Size(CONFIG.morphKernelSize, CONFIG.morphKernelSize));
+            cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
             
             state.binary = binary.clone();
             cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -264,11 +289,13 @@
             this.drawResults(src, sortedBubbles, results);
             cv.imshow(canvas, src);
             
+            // Liberar memória
             src.delete();
             gray.delete();
             binary.delete();
             contours.delete();
             hierarchy.delete();
+            kernel.delete();
             
             resolve(results);
             
@@ -293,7 +320,8 @@
             bubbles.push({
               contour,
               rect,
-              center: { x: rect.x + rect.width/2, y: rect.y + rect.height/2 }
+              center: { x: rect.x + rect.width/2, y: rect.y + rect.height/2 },
+              area
             });
           }
         }
@@ -304,6 +332,10 @@
       sortBubbles: function(bubbles) {
         if (bubbles.length === 0) return bubbles;
         
+        // Primeiro ordena por posição Y (linhas)
+        bubbles.sort((a, b) => a.center.y - b.center.y);
+        
+        // Agrupa por linhas
         const rows = [];
         let currentRow = [bubbles[0]];
         
@@ -314,6 +346,7 @@
           if (Math.abs(currCenterY - prevCenterY) < CONFIG.maxLineHeightVariation) {
             currentRow.push(bubbles[i]);
           } else {
+            // Ordena cada linha por posição X (colunas)
             currentRow.sort((a, b) => a.center.x - b.center.x);
             rows.push(currentRow);
             currentRow = [bubbles[i]];
@@ -332,33 +365,45 @@
         const results = [];
         let correctCount = 0;
         
+        // Agrupa bolhas por questão
         const questions = [];
-        for (let i = 0; i < bubbles.length; i += CONFIG.optionsPerQuestion) {
-          questions.push(bubbles.slice(i, i + CONFIG.optionsPerQuestion));
+        const questionsCount = Math.ceil(bubbles.length / CONFIG.optionsPerQuestion);
+        
+        for (let q = 0; q < questionsCount; q++) {
+          const startIdx = q * CONFIG.optionsPerQuestion;
+          const endIdx = startIdx + CONFIG.optionsPerQuestion;
+          questions.push(bubbles.slice(startIdx, endIdx));
         }
         
+        // Processa cada questão
         questions.forEach((questionBubbles, qIndex) => {
           if (qIndex >= Object.keys(CONFIG.answerKey).length) return;
           
-          const markedIndex = this.detectMarkedBubble(questionBubbles);
+          const markedIndex = this.detectMarkedBubble(questionBubbles, qIndex);
           const isCorrect = markedIndex === CONFIG.answerKey[qIndex];
           
           if (isCorrect) correctCount++;
           
           results.push({
             question: qIndex + 1,
-            marked: markedIndex !== -1 ? markedIndex + 1 : '-',
-            correct: CONFIG.answerKey[qIndex] + 1,
-            isCorrect: markedIndex !== -1 ? isCorrect : false
+            marked: markedIndex !== -1 ? this.indexToLetter(markedIndex) : '-',
+            correct: this.indexToLetter(CONFIG.answerKey[qIndex]),
+            isCorrect,
+            debug: state.debugData[qIndex] || {}
           });
         });
         
         return { answers: results, correctCount };
       },
 
-      detectMarkedBubble: function(bubbles) {
+      indexToLetter: function(index) {
+        return String.fromCharCode(65 + index); // 0=A, 1=B, etc.
+      },
+
+      detectMarkedBubble: function(bubbles, qIndex) {
         let markedIndex = -1;
         let maxFill = 0;
+        const debugInfo = {};
         
         bubbles.forEach((bubble, index) => {
           const contourVector = new cv.MatVector();
@@ -369,9 +414,12 @@
           
           const masked = new cv.Mat();
           cv.bitwise_and(state.binary, mask, masked);
+          
           const fillPixels = cv.countNonZero(masked);
-          const totalPixels = bubble.rect.width * bubble.rect.height;
-          const fillPercentage = (fillPixels / totalPixels) * 100;
+          const bubbleArea = cv.contourArea(bubble.contour);
+          const fillPercentage = (fillPixels / bubbleArea) * 100;
+          
+          debugInfo[`Q${qIndex+1}-${this.indexToLetter(index)}`] = `${fillPercentage.toFixed(1)}%`;
           
           if (fillPercentage > CONFIG.minFillPercentage && fillPercentage > maxFill) {
             maxFill = fillPercentage;
@@ -383,6 +431,7 @@
           contourVector.delete();
         });
         
+        state.debugData[qIndex] = debugInfo;
         return markedIndex;
       },
 
@@ -392,10 +441,12 @@
           if (qIndex >= results.answers.length) return;
           
           const answer = results.answers[qIndex];
-          if ((i % CONFIG.optionsPerQuestion) === (answer.marked - 1) || answer.marked === '-') {
+          const optionIndex = i % CONFIG.optionsPerQuestion;
+          
+          if (optionIndex === answer.marked.charCodeAt(0) - 65 || answer.marked === '-') {
             const color = answer.isCorrect 
-              ? new cv.Scalar(0, 255, 0, 255)  // Verde
-              : new cv.Scalar(0, 0, 255, 255);  // Vermelho
+              ? new cv.Scalar(0, 255, 0, 255)  // Verde para correto
+              : new cv.Scalar(0, 0, 255, 255);  // Vermelho para incorreto
             
             const thickness = 2;
             const contourVector = new cv.MatVector();
@@ -443,6 +494,21 @@
         elements.results.innerHTML = html;
         elements.status.textContent = "Processamento concluído com sucesso!";
         elements.status.className = "status-box status-ready";
+      },
+
+      displayDebugInfo: function() {
+        let debugHtml = "<h3>Informações de Debug:</h3><ul>";
+        
+        state.debugData.forEach((questionDebug, qIndex) => {
+          debugHtml += `<li><strong>Questão ${qIndex + 1}:</strong> `;
+          debugHtml += Object.entries(questionDebug)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(", ");
+          debugHtml += "</li>";
+        });
+        
+        debugHtml += "</ul>";
+        elements.debugInfo.innerHTML = debugHtml;
       },
 
       showError: function(message) {
