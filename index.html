@@ -24,16 +24,16 @@
     let notaDiv = document.getElementById('nota');
     let cap, src, gray, out;
 
-    function startCamera() {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        .then(stream => {
-          video.srcObject = stream;
-          video.play();
-        })
-        .catch(err => {
-          notaDiv.innerText = `Erro ao acessar câmera: ${err}`;
-        });
-    }
+function startCamera() {
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+    .then(stream => {
+      video.srcObject = stream;
+      video.play();
+    })
+    .catch(err => {
+      notaDiv.innerText = `Erro ao acessar câmera: ${err}`;
+    });
+}
 
     function onOpenCvReady() {
       console.log('Executando onOpenCvReady');
