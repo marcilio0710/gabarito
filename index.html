@@ -1,9 +1,9 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Corretor de Prova OMR</title>
-  <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
+  <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body { font-family: sans-serif; text-align: center; }
     video, canvas { width: 90%; max-width: 400px; margin: 10px auto; }
@@ -36,6 +36,7 @@
     }
 
     function onOpenCvReady() {
+      console.log('Executando onOpenCvReady');
       notaDiv.innerText = 'Carregando câmera...';
       startCamera();
 
@@ -53,67 +54,11 @@
       });
     }
 
-    function processVideo() {
-      let begin = Date.now();
-      cap.read(src);
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-      cv.Canny(gray, gray, 75, 200);
-
-      let cnts = new cv.MatVector(), hierarchy = new cv.Mat();
-      cv.findContours(gray, cnts, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-      let bubbles = [];
-      for (let i = 0; i < cnts.size(); i++) {
-        let c = cnts.get(i);
-        let r = cv.boundingRect(c);
-        let ar = r.width / r.height;
-        if (r.width > 20 && r.height > 20 && ar > 0.9 && ar < 1.1) {
-          bubbles.push({ctr: c, rect: r});
-        }
-      }
-
-      bubbles.sort((a,b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
-
-      let rows = [];
-      const choices = 5;
-      for (let i = 0; i < bubbles.length; i += choices) {
-        rows.push(bubbles.slice(i, i + choices));
-      }
-
-      let correctCount = 0;
-      rows.forEach((row, qi) => {
-        let maxIdx = -1, maxVal = 0;
-        row.forEach((b, j) => {
-          let mask = new cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
-          cv.drawContours(mask, new cv.MatVector(b.ctr), -1, new cv.Scalar(255), -1);
-          let m = new cv.Mat();
-          cv.bitwise_and(gray, mask, m);
-          let cnt = cv.countNonZero(m);
-          if (cnt > maxVal) { maxVal = cnt; maxIdx = j; }
-          m.delete(); mask.delete();
-        });
-
-        let correct = ANSWER_KEY[qi];
-        let center = new cv.Point(
-          row[maxIdx].rect.x + row[maxIdx].rect.width/2,
-          row[maxIdx].rect.y + row[maxIdx].rect.height/2
-        );
-        let color = (maxIdx === correct) ? [0,255,0] : [0,0,255];
-        cv.circle(out, center, row[maxIdx].rect.width / 2, color, 4);
-        if (maxIdx === correct) correctCount++;
-      });
-
-      cv.imshow(canvas, out);
-      notaDiv.innerText = `Acertos: ${correctCount}/${Object.keys(ANSWER_KEY).length} — Nota: ${((correctCount/Object.keys(ANSWER_KEY).length)*100).toFixed(1)}%`;
-
-      cnts.delete(); hierarchy.delete();
-      let delay = 1000 / FPS - (Date.now() - begin);
-      setTimeout(processVideo, delay);
-    }
-
-    cv['onRuntimeInitialized'] = onOpenCvReady;
+    // Atribui ao evento de carregamento do OpenCV
+    cv['onRuntimeInitialized'] = () => {
+      console.log('OpenCV pronto');
+      onOpenCvReady();
+    };
   </script>
 </body>
 </html>
-
