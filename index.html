@@ -16,6 +16,24 @@
   <canvas id="canvasOutput"></canvas>
   <div id="nota">Aguardando inicialização...</div>
 
+ <!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Corretor de Prova OMR</title>
+  <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; }
+    video, canvas { width: 90%; max-width: 400px; margin: 10px auto; }
+    #nota { font-size: 1.2em; margin: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Corretor OMR no Navegador</h1>
+  <video id="videoInput" autoplay playsinline></video>
+  <canvas id="canvasOutput"></canvas>
+  <div id="nota">Aguardando inicialização...</div>
+
   <script>
     const ANSWER_KEY = {0:1,1:4,2:0,3:3,4:1};
     const FPS = 10;
@@ -114,5 +132,7 @@
 
     cv['onRuntimeInitialized'] = onOpenCvReady;
   </script>
+</body>
+</html>
 </body>
 </html>
