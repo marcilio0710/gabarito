@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Corretor OMR - Gabarito Personalizado</title>
+  <title>Corretor OMR Completo</title>
   <script src="https://docs.opencv.org/4.8.0/opencv.js"></script>
   <style>
     body {
@@ -100,7 +100,7 @@
 <body>
   <div class="header">
     <h1>Corretor Automático de Gabaritos</h1>
-    <p>Gabarito Configurado: 0-A,1-A,2-B,3-B,4-C,5-C,6-D,7-D,8-C,9-C</p>
+    <p>Gabarito Configurado: 1-A, 2-A, 3-B, 4-B, 5-C, 6-C, 7-D, 8-D, 9-C, 10-C</p>
   </div>
 
   <div class="status-box" id="status">Inicializando sistema...</div>
@@ -135,8 +135,7 @@
       minBubbleArea: 200,
       maxBubbleArea: 2500,
       minFillPercentage: 40,
-      maxLineHeightVariation: 20,
-      rowGroupingThreshold: 0.5
+      maxLineHeightVariation: 20
     };
 
     // Elementos da interface
@@ -370,8 +369,11 @@
         let maxFill = 0;
         
         bubbles.forEach((bubble, index) => {
+          const contourVector = new cv.MatVector();
+          contourVector.push_back(bubble.contour);
+          
           const mask = new cv.Mat.zeros(state.binary.rows, state.binary.cols, cv.CV_8UC1);
-          cv.drawContours(mask, new cv.MatVector(bubble.contour), -1, 255, -1);
+          cv.drawContours(mask, contourVector, -1, 255, -1);
           
           const masked = new cv.Mat();
           cv.bitwise_and(state.binary, mask, masked);
@@ -386,6 +388,7 @@
           
           mask.delete();
           masked.delete();
+          contourVector.delete();
         });
         
         return markedIndex;
@@ -401,7 +404,11 @@
             const center = new cv.Point(bubble.center.x, bubble.center.y);
             const radius = bubble.rect.width / 2;
             const color = answer.isCorrect ? new cv.Scalar(0, 255, 0) : new cv.Scalar(0, 0, 255);
-            cv.circle(src, center, radius, color, 3);
+            
+            const contourVector = new cv.MatVector();
+            contourVector.push_back(bubble.contour);
+            cv.drawContours(src, contourVector, -1, color, 2);
+            contourVector.delete();
           }
         });
       },
