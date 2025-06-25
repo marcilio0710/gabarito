@@ -360,15 +360,13 @@
             cv.cvtColor(contrasted, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
             
-            const binary = new cv.Mat();
-            cv.adaptiveThreshold(gray, binary, 255, 
-                               cv.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                               cv.THRESH_BINARY_INV, 
-                               31, 7);
+            // Detecção de bordas usando Canny
+            const edges = new cv.Mat();
+            cv.Canny(gray, edges, 50, 150); // Ajuste os valores de threshold se necessário
             
-            // Combina detecção de cor com detecção de forma
+            // Combina detecção de cor com detecção de bordas
             const combined = new cv.Mat();
-            cv.bitwise_and(binary, colorMask, combined);
+            cv.bitwise_and(edges, colorMask, combined);
             
             // Operações morfológicas
             const kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
@@ -395,7 +393,7 @@
             blackMask.delete();
             colorMask.delete();
             gray.delete();
-            binary.delete();
+            edges.delete();
             combined.delete();
             contours.delete();
             hierarchy.delete();
